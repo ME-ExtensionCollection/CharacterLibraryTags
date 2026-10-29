@@ -1,11 +1,11 @@
 // Character Library Tag Filter
 //
 // Full-page External Extension for Marinara Engine. Adds a tag button to the
-// full Character Library that expands "At least one tag" and "Excluded tags"
-// fields with autocomplete.
+// full Character Library that expands "Mandatory tags", "At least one tag" and
+// "Excluded tags" fields with autocomplete.
 //
-// - Included tags (any-of) hide non-matching cards through an injected
-//   stylesheet, so React-owned nodes are never modified.
+// - Mandatory (all-of) and included (any-of) tags hide non-matching cards
+//   through an injected stylesheet, so React-owned nodes are never modified.
 // - Excluded tags live in the library search box as `-tag:"X"` tokens, which
 //   Marinara already understands. The search box is the source of truth.
 
@@ -34,6 +34,7 @@ const catalog = {
 };
 
 // Reset whenever the library mounts, matching Marinara's own search box.
+const requiredTags = new Map(); // normalized tag -> label
 const includedTags = new Map(); // normalized tag -> label
 let view = null;
 let frame = 0;
@@ -41,7 +42,7 @@ let unknownCardTimer = 0;
 let stopped = false;
 
 const styleElement = document.createElement("style");
-styleElement.id = "clt-include-style";
+styleElement.id = "clt-tag-style";
 document.head.append(styleElement);
 
 // ── DOM helpers ──
@@ -173,20 +174,24 @@ function scheduleCatalogRefresh() {
 
 const labelFor = (key, fallback) => catalog.tagInfo.get(key)?.label ?? fallback;
 
-// ── Include (any-of) ──
+// ── Mandatory (all-of) and include (any-of) ──
 
-function matchesIncluded(tags) {
+const hasTagFilters = () => requiredTags.size > 0 || includedTags.size > 0;
+
+function matchesTagFilters(tags) {
   if (!tags) return false;
+  for (const key of requiredTags.keys()) if (!tags.has(key)) return false;
+  if (includedTags.size === 0) return true;
   for (const key of includedTags.keys()) if (tags.has(key)) return true;
   return false;
 }
 
-function renderIncludeStyle() {
+function renderTagStyle() {
   let css = "";
-  if (view && includedTags.size > 0) {
+  if (view && hasTagFilters()) {
     const selectors = [];
     for (const [id, tags] of catalog.idToTags) {
-      if (matchesIncluded(tags)) continue;
+      if (matchesTagFilters(tags)) continue;
       const card = `${ROOT_SELECTOR} [${CARD_ATTRIBUTE}="${CSS.escape(id)}"]`;
       // The sibling is the inline detail Marinara shows under a selected card on small screens.
       selectors.push(card, `${card} + .col-span-full`);
@@ -196,15 +201,19 @@ function renderIncludeStyle() {
   if (styleElement.textContent !== css) styleElement.textContent = css;
 }
 
-function addIncludedTag(label) {
-  includedTags.set(normalizeTag(label), label);
-  renderFilters();
-}
+const tagSetter = (tags) => ({
+  add(label) {
+    tags.set(normalizeTag(label), label);
+    renderFilters();
+  },
+  remove(key) {
+    tags.delete(key);
+    renderFilters();
+  },
+});
 
-function removeIncludedTag(key) {
-  includedTags.delete(key);
-  renderFilters();
-}
+const requiredTagSetter = tagSetter(requiredTags);
+const includedTagSetter = tagSetter(includedTags);
 
 // ── Exclude (search box `-tag:` tokens) ──
 
@@ -436,6 +445,7 @@ function setPanelOpen(open) {
 }
 
 function mount(root, anchors) {
+  requiredTags.clear();
   includedTags.clear();
   catalog.requestedIds.clear();
 
@@ -447,13 +457,22 @@ function mount(root, anchors) {
   toggle.append(createTagIcon(), badge);
   toggle.addEventListener("click", () => setPanelOpen(!view.open));
 
+  const requiredField = createTagField({
+    id: "clt-required",
+    label: "Mandatory tags:",
+    chipClass: "mari-chrome-control--selected clt-chip--required",
+    readTags: () => requiredTags,
+    addTag: requiredTagSetter.add,
+    removeTag: requiredTagSetter.remove,
+    canAdd: () => true,
+  });
   const includeField = createTagField({
     id: "clt-include",
     label: "At least one tag:",
     chipClass: "clt-chip--include",
     readTags: () => includedTags,
-    addTag: addIncludedTag,
-    removeTag: removeIncludedTag,
+    addTag: includedTagSetter.add,
+    removeTag: includedTagSetter.remove,
     canAdd: () => true,
   });
   const excludeField = createTagField({
@@ -468,9 +487,26 @@ function mount(root, anchors) {
   });
   const hint = el("p", { className: "clt-hint", attrs: { "aria-live": "polite" } });
   const panel = el("div", { className: "clt-panel", attrs: { id: "clt-panel" } });
-  panel.append(includeField.label, includeField.box, excludeField.label, excludeField.box, hint);
+  panel.append(
+    requiredField.label,
+    requiredField.box,
+    includeField.label,
+    includeField.box,
+    excludeField.label,
+    excludeField.box,
+    hint,
+  );
 
-  view = { root, searchInput: null, toggle, badge, panel, includeField, excludeField, hint, open: false };
+  view = {
+    root,
+    searchInput: null,
+    toggle,
+    badge,
+    panel,
+    fields: [requiredField, includeField, excludeField],
+    hint,
+    open: false,
+  };
   setPanelOpen(false);
   attach(anchors);
   renderFilters();
@@ -494,8 +530,9 @@ function unmount() {
   view.toggle.remove();
   view.panel.remove();
   view = null;
+  requiredTags.clear();
   includedTags.clear();
-  renderIncludeStyle();
+  renderTagStyle();
 }
 
 function renderHint() {
@@ -511,16 +548,16 @@ function renderHint() {
   }
 
   let text = "";
-  if (includedTags.size > 0) {
+  if (hasTagFilters()) {
     if (!catalog.loaded) {
       text = "Loading tags…";
     } else {
       const excluded = [...readExcludedTags().keys()];
       let visible = 0;
-      for (const id of ids) if (matchesIncluded(catalog.idToTags.get(id))) visible += 1;
+      for (const id of ids) if (matchesTagFilters(catalog.idToTags.get(id))) visible += 1;
       let total = 0;
       for (const tags of catalog.idToTags.values()) {
-        if (matchesIncluded(tags) && !excluded.some((key) => tags.has(key))) total += 1;
+        if (matchesTagFilters(tags) && !excluded.some((key) => tags.has(key))) total += 1;
       }
       text = `Showing ${visible} of ${total} characters with these tags.`;
       if (visible < total) text += " Use Load more, or clear the search text, to see the rest.";
@@ -532,10 +569,9 @@ function renderHint() {
 
 function renderFilters() {
   if (!view) return;
-  view.includeField.render();
-  view.excludeField.render();
-  renderIncludeStyle();
-  const active = includedTags.size + readExcludedTags().size;
+  for (const field of view.fields) field.render();
+  renderTagStyle();
+  const active = requiredTags.size + includedTags.size + readExcludedTags().size;
   const badgeText = active ? String(active) : "";
   if (view.badge.textContent !== badgeText) view.badge.textContent = badgeText;
   view.badge.hidden = !active;
