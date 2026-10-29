@@ -12,6 +12,12 @@ The rows combine: a character is shown when it has all mandatory tags, at least 
 
 Type in either field to get tag suggestions with character counts. Add a tag by clicking it or pressing Enter, and move through suggestions with the arrow keys. Backspace in an empty field removes the last tag.
 
+<img width="1931" height="380" alt="image" src="https://github.com/user-attachments/assets/d693c5e6-ee00-4e87-978f-c2315791a872" />
+
+<img width="947" height="403" alt="image" src="https://github.com/user-attachments/assets/5d6bebc6-6815-462b-b36b-f0f5d9affc89" />
+
+
+
 ## How it works
 
 - **Excluded tags** are written into the library search box as `-tag:"Tag"`, which is Marinara's own exclusion syntax. The two stay in sync: typing `-tag:"X"` into the search box by hand adds a chip, and removing the token removes the chip.
