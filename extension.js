@@ -418,10 +418,11 @@ function createTagField({ id, label, chipClass, readTags, addTag, removeTag, can
 
 function findAnchors(root) {
   const searchInput = root.querySelector("input.mari-chrome-field");
-  const headerRow = searchInput?.closest(".grid")?.parentElement;
+  const toolbar = searchInput?.closest(".grid");
+  const headerRow = toolbar?.parentElement;
   const header = headerRow?.parentElement;
   if (!searchInput || !headerRow || !header || !root.contains(header)) return null;
-  return { searchInput, headerRow, header };
+  return { searchInput, toolbar, headerRow, header };
 }
 
 function onSearchInput() {
@@ -476,13 +477,14 @@ function mount(root, anchors) {
   void refreshCatalog();
 }
 
-function attach({ searchInput, headerRow, header }) {
+function attach({ searchInput, toolbar, headerRow, header }) {
   if (view.searchInput !== searchInput) {
     view.searchInput?.removeEventListener("input", onSearchInput);
     view.searchInput = searchInput;
     searchInput.addEventListener("input", onSearchInput);
   }
-  if (view.toggle.parentElement !== headerRow) headerRow.append(view.toggle);
+  // Left of the toolbar, in the header's empty space, so the toolbar keeps its width.
+  if (view.toggle.nextElementSibling !== toolbar) headerRow.insertBefore(view.toggle, toolbar);
   if (view.panel.parentElement !== header) header.append(view.panel);
 }
 
