@@ -1,0 +1,181 @@
+/* Character Library Tag Filter. Colors come from Marinara's chrome tokens so the UI follows the active theme. */
+
+.clt-toggle {
+  position: relative;
+  flex: none;
+  align-self: flex-start;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border-radius: 1rem;
+}
+
+.clt-toggle-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+.clt-toggle-badge {
+  position: absolute;
+  top: -0.25rem;
+  right: -0.25rem;
+  min-width: 1rem;
+  height: 1rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: var(--marinara-chat-chrome-accent);
+  color: var(--background);
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1rem;
+  text-align: center;
+}
+
+.clt-panel {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 24rem);
+  justify-content: end;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0 1.5rem 0.75rem;
+}
+
+.clt-panel[hidden],
+.clt-toggle-badge[hidden],
+.clt-suggestions[hidden],
+.clt-hint[hidden] {
+  display: none;
+}
+
+.clt-label {
+  font-size: 0.8125rem;
+  text-align: right;
+  color: var(--marinara-chat-chrome-panel-muted);
+}
+
+.clt-field {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.25rem 0.375rem;
+  cursor: text;
+}
+
+.clt-field:focus-within {
+  border-color: var(--marinara-chat-chrome-button-border-active);
+  box-shadow: 0 0 0 1px var(--marinara-chat-chrome-focus-ring);
+}
+
+.clt-input {
+  flex: 1 1 6rem;
+  min-width: 4rem;
+  border: 0;
+  padding: 0.125rem 0.25rem;
+  background: transparent;
+  color: inherit;
+  font-size: 0.75rem;
+  outline: none;
+}
+
+.clt-chip {
+  max-width: 100%;
+  gap: 0.25rem;
+  padding-right: 0.25rem;
+  cursor: default;
+}
+
+.clt-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clt-chip-remove {
+  border: 0;
+  padding: 0 0.125rem;
+  background: none;
+  color: inherit;
+  font-size: 0.875rem;
+  line-height: 1;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.clt-chip-remove:hover,
+.clt-chip-remove:focus-visible {
+  opacity: 1;
+}
+
+.clt-suggestions {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  max-height: 16rem;
+  margin: 0;
+  padding: 0.25rem;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--marinara-chat-chrome-input-border);
+  border-radius: 0.75rem;
+  background: var(--marinara-chat-chrome-panel-bg, var(--card));
+  box-shadow: 0 16px 40px -20px rgba(15, 23, 42, 0.75);
+}
+
+.clt-suggestion {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.5rem;
+  color: var(--marinara-chat-chrome-panel-title);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.clt-suggestion[aria-selected="true"] {
+  background: var(--marinara-chat-chrome-button-bg-active);
+  color: var(--marinara-chat-chrome-button-text-active);
+}
+
+.clt-suggestion[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.clt-suggestion-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clt-suggestion-count {
+  flex: none;
+  color: var(--marinara-chat-chrome-panel-muted);
+}
+
+.clt-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.75rem;
+  text-align: right;
+  color: var(--marinara-chat-chrome-panel-muted);
+}
+
+@media (max-width: 639px) {
+  .clt-panel {
+    grid-template-columns: minmax(0, 1fr);
+    justify-content: stretch;
+    gap: 0.25rem;
+    padding: 0 0.75rem 0.5rem;
+  }
+
+  .clt-label,
+  .clt-hint {
+    text-align: left;
+  }
+}
