@@ -15,7 +15,6 @@
 const ROOT_SELECTOR = '[data-component="CharacterLibraryView"]';
 const CHARACTER_KIND_SELECTOR = ".mari-panel-gradient--characters";
 const CARD_ATTRIBUTE = "data-card-library-card";
-const CATALOG_PAGE_SIZE = 100;
 const MAX_SUGGESTIONS = 10;
 const UNKNOWN_CARD_REFRESH_DELAY = 500;
 // Mirrors parseCardLibrarySearchQuery in packages/client/src/lib/card-library-search.ts.
@@ -92,61 +91,55 @@ function createTagIcon() {
 
 // ── Catalog ──
 
+// The catalog comes from CLMData (data.js), shared with the manager window.
 async function fetchCatalog() {
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const idToTags = new Map();
-    const labelCounts = new Map();
-    let generation = null;
-    let offset = 0;
-    let changed = false;
-    for (;;) {
-      // `view=summary` returns every row at once; older builds ignore it and page.
-      const response = await marinara.fetch(
-        `/api/characters/catalog?view=summary&limit=${CATALOG_PAGE_SIZE}&offset=${offset}`,
-      );
-      if (!response.ok) throw new Error(`Catalog request failed (${response.status})`);
-      const page = await response.json();
-      generation ??= page.catalogGeneration;
-      if (page.catalogGeneration !== generation) {
-        changed = true;
-        break;
-      }
-      for (const item of page.items) {
-        const tags = new Set();
-        for (const raw of Array.isArray(item.tags) ? item.tags : []) {
-          const key = normalizeTag(raw);
-          if (!key || tags.has(key)) continue;
-          tags.add(key);
-          const label = raw.trim();
-          const labels = labelCounts.get(key) ?? new Map();
-          labels.set(label, (labels.get(label) ?? 0) + 1);
-          labelCounts.set(key, labels);
-        }
-        idToTags.set(item.id, tags);
-      }
-      if (!page.hasMore || page.items.length === 0) break;
-      offset += page.items.length;
-    }
-    if (changed) continue;
-
-    const tagInfo = new Map();
-    for (const [key, labels] of labelCounts) {
-      let label = key;
-      let best = 0;
-      let count = 0;
-      for (const [candidate, uses] of labels) {
-        count += uses;
-        if (uses > best) {
-          best = uses;
-          label = candidate;
-        }
-      }
-      tagInfo.set(key, { key, label, count });
-    }
-    return { idToTags, tagInfo };
-  }
-  throw new Error("Character catalog changed repeatedly while loading.");
+  if (CLMData.loaded) await CLMData.revalidate();
+  else await CLMData.load();
+  return indexCatalog(CLMData.items);
 }
+
+function indexCatalog(items) {
+  const idToTags = new Map();
+  const labelCounts = new Map();
+  for (const item of items) {
+    const tags = new Set();
+    for (const raw of Array.isArray(item.tags) ? item.tags : []) {
+      const key = normalizeTag(raw);
+      if (!key || tags.has(key)) continue;
+      tags.add(key);
+      const label = raw.trim();
+      const labels = labelCounts.get(key) ?? new Map();
+      labels.set(label, (labels.get(label) ?? 0) + 1);
+      labelCounts.set(key, labels);
+    }
+    idToTags.set(item.id, tags);
+  }
+
+  const tagInfo = new Map();
+  for (const [key, labels] of labelCounts) {
+    let label = key;
+    let best = 0;
+    let count = 0;
+    for (const [candidate, uses] of labels) {
+      count += uses;
+      if (uses > best) {
+        best = uses;
+        label = candidate;
+      }
+    }
+    tagInfo.set(key, { key, label, count });
+  }
+  return { idToTags, tagInfo };
+}
+
+// Tag edits made in the manager window show up here without another request.
+const unsubscribeCatalog = CLMData.subscribe(({ items }) => {
+  const result = indexCatalog(items);
+  catalog.idToTags = result.idToTags;
+  catalog.tagInfo = result.tagInfo;
+  catalog.loaded = true;
+  renderFilters();
+});
 
 function refreshCatalog() {
   if (catalog.loading) {
@@ -641,6 +634,7 @@ sync();
 
 marinara.onCleanup(() => {
   stopped = true;
+  unsubscribeCatalog();
   observer.disconnect();
   if (frame) cancelAnimationFrame(frame);
   unmount();
