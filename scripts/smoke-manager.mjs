@@ -14,7 +14,8 @@ async function openManager(page) {
 const countText = (page) => page.$eval(".clm-count", (n) => n.textContent);
 async function waitCount(page, n, total = 3005) {
   const text = `${n.toLocaleString("en-US")} of ${total.toLocaleString("en-US")}`;
-  await page.waitForFunction((t) => document.querySelector(".clm-count")?.textContent.startsWith(t), text, { timeout: 5000 }).catch(async () => {
+  // The count reads "N of M" (exact), optionally followed by a status note.
+  await page.waitForFunction((t) => (document.querySelector(".clm-count")?.textContent === t || document.querySelector(".clm-count")?.textContent.startsWith(`${t} `)), text, { timeout: 5000 }).catch(async () => {
     throw new Error(`count: expected "${text}…", got "${await countText(page)}"`);
   });
 }

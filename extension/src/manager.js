@@ -54,6 +54,7 @@ const CLMManager = (() => {
     plus: [["path", { d: "M5 12h14M12 5v14" }]],
     folder: [["path", { d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" }]],
     check: [["path", { d: "M20 6 9 17l-5-5" }]],
+    bookmark: [["path", { d: "m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" }]],
   };
 
   function icon(name, className = "clm-icon") {
@@ -89,6 +90,33 @@ const CLMManager = (() => {
     Object.assign(node, rest);
     for (const child of children.flat()) if (child !== null && child !== undefined && child !== false) node.append(child);
     return node;
+  }
+
+  /**
+   * A native select shown as a compact button: an icon and/or a short label,
+   * with the real select laid invisibly on top so the opened list still shows
+   * every option in full.
+   */
+  function compactSelect(select, { iconName = null, label = () => "" } = {}) {
+    const text = h("span.clm-compact-label");
+    const box = h(
+      "span.clm-btn.clm-compact",
+      { attrs: { title: select.title } },
+      iconName ? icon(iconName) : null,
+      text,
+      icon("chevron", "clm-icon clm-compact-chevron"),
+      select,
+    );
+    select.classList.add("clm-compact-select");
+    box.sync = () => {
+      const option = select.selectedOptions[0] ?? null;
+      const value = option ? label(option) : "";
+      if (text.textContent !== value) text.textContent = value;
+      text.hidden = !value;
+      box.title = option && option.value ? `${select.title}: ${option.textContent}` : select.title;
+    };
+    select.addEventListener("change", box.sync);
+    return box;
   }
 
   function iconButton(name, title, onClick, extraClass = "") {
@@ -201,6 +229,8 @@ const CLMManager = (() => {
       select.dataset.signature = signature;
     }
     select.value = current ? `load:${S.presets.indexOf(current)}` : "";
+    ui.presetBox.classList.toggle("clm-on", !!current);
+    ui.presetBox.sync();
   }
 
   function savePresets() {
@@ -603,6 +633,14 @@ const CLMManager = (() => {
       },
     });
 
+    const SCOPE_SHORT = { any: "All", name: "Name", creator: "Creator", tags: "Tags", all: "Full text" };
+    const scopeBox = compactSelect(scopeSelect, { label: (o) => SCOPE_SHORT[o.value] ?? o.textContent });
+    const presetBox = compactSelect(presetSelect, { iconName: "bookmark" });
+    const folderBox = compactSelect(folderSelect, {
+      iconName: "folder",
+      label: (o) => (o.value === "none" ? "No folder" : o.value === "some" ? "In a folder" : o.value ? (S.index.folderById.get(o.value)?.name ?? "") : ""),
+    });
+    sortSelect.title = "Sorted by";
     const toolbar = h(
       "div.clm-toolbar",
       {},
@@ -613,12 +651,12 @@ const CLMManager = (() => {
         toggleButton("sliders", "More filters", "showAdvanced"),
         toggleButton("hash", "Tag cloud", "showCloud"),
       ),
-      h("div.clm-toolbar-group", {}, h("span.clm-label", { text: "Sorted by" }), sortSelect, reshuffle),
-      h("div.clm-toolbar-group.clm-grow", {}, scopeSelect, searchWrap, presetSelect),
+      h("div.clm-toolbar-group", {}, sortSelect, reshuffle),
+      h("div.clm-toolbar-group.clm-grow", {}, scopeBox, searchWrap, presetBox),
       h(
         "div.clm-toolbar-group",
         {},
-        folderSelect,
+        folderBox,
         favButton,
         iconButton("dice", "Random character", pickRandom),
         iconButton("refresh", "Reload the library", () => void refresh(true)),
@@ -743,6 +781,9 @@ const CLMManager = (() => {
       searchInput,
       presetSelect,
       folderSelect,
+      scopeBox,
+      presetBox,
+      folderBox,
       favButton,
       count,
       clearButton,
@@ -964,8 +1005,9 @@ const CLMManager = (() => {
       select.dataset.signature = signature;
     }
     select.value = S.query.folder ?? "";
-    select.classList.toggle("clm-on", !!S.query.folder);
-    select.hidden = folders.length === 0 && !S.query.folder;
+    ui.folderBox.classList.toggle("clm-on", !!S.query.folder);
+    ui.folderBox.hidden = folders.length === 0 && !S.query.folder;
+    ui.folderBox.sync();
   }
 
   function folderChip(id, card) {
@@ -1272,6 +1314,7 @@ const CLMManager = (() => {
     ui.sortSelect.value = S.sort;
     ui.reshuffle.hidden = S.sort !== "random";
     ui.scopeSelect.value = q.scope;
+    ui.scopeBox.sync();
     if (document.activeElement !== ui.searchInput && ui.searchInput.value !== q.text) ui.searchInput.value = q.text;
     ui.favButton.classList.toggle("clm-on", q.favoritesOnly);
     ui.favButton.setAttribute("aria-pressed", String(q.favoritesOnly));
@@ -1289,13 +1332,13 @@ const CLMManager = (() => {
 
     const active = CLM.activeFilterCount(q);
     const total = S.index.cards.length;
-    let status = S.loading && !total ? "Loading…" : `${S.results.length.toLocaleString()} of ${plural(total, "character")}`;
+    let status = S.loading && !total ? "Loading…" : `${S.results.length.toLocaleString()} of ${total.toLocaleString()}`;
     if (q.scope === "all" && CLM.serverTerms(q).length) {
       status += S.serverError ? " · text search failed" : S.serverIds === null ? " · searching card text…" : "";
     }
     if (S.loadError) status = S.loadError;
     ui.count.textContent = status;
-    ui.count.title = S.serverError || S.loadError || "";
+    ui.count.title = S.serverError || S.loadError || `${S.results.length.toLocaleString()} of ${plural(total, "character")} shown`;
     ui.clearButton.hidden = active === 0;
     renderFolderSelect();
     for (const id of S.multi) if (!S.index.byId.has(id)) S.multi.delete(id);
