@@ -7,7 +7,7 @@
     "description": "Adds mandatory (all-of), include (any-of) and exclude tag filters with autocomplete to the full Character Library.",
     "runtime": "client",
     "capabilities": ["full_page_access"],
-    "jsPath": ["src/filter-panel.js"],
+    "jsPath": ["src/core.js", "src/filter-panel.js"],
     "cssPath": "extension.css"
   }
 }
