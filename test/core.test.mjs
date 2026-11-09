@@ -175,3 +175,22 @@ test("filters 20,000 mock cards quickly", () => {
   CLM.facetCounts(results);
   assert.ok(performance.now() - sortStart < 100);
 });
+
+test("folders: filter, folder: syntax and counts", () => {
+  const folders = [
+    { id: "f1", name: "Fantasy Crew", characterIds: ["a", "f", "ghost"] },
+    { id: "f2", name: "Sci-Fi", characterIds: ["b", "a"] },
+  ];
+  const withFolders = CLM.buildIndex(tinyCatalog(), { folders });
+  const q = (patch) => ids(CLM.filter(withFolders, { ...CLM.emptyQuery(), ...patch }));
+  assert.deepEqual(withFolders.byId.get("a").folderIds, ["f1", "f2"]);
+  assert.deepEqual(q({ folder: "f1" }), ["a", "f"]);
+  assert.deepEqual(q({ folder: "some" }), ["a", "b", "f"]);
+  assert.deepEqual(q({ folder: "none" }), ["c", "d", "e"]);
+  assert.deepEqual(q({ text: "folder:crew" }), ["a", "f"]);
+  assert.deepEqual(q({ text: 'folder:"sci-fi" -folder:crew' }), ["b"]);
+  // Deleted characters in a folder do not count.
+  assert.equal(withFolders.folderById.get("f1").count, 2);
+  assert.deepEqual(withFolders.folders.map((f) => f.name), ["Fantasy Crew", "Sci-Fi"]);
+  assert.equal(CLM.activeFilterCount({ ...CLM.emptyQuery(), folder: "none" }), 1);
+});

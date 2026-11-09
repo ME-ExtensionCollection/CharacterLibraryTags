@@ -44,6 +44,7 @@ const CLM = (() => {
       tagCount: { min: null, max: null },
       tokens: { min: null, max: null },
       created: { from: null, to: null }, // ms timestamps
+      folder: null, // null = any, "none" = in no folder, "some" = in a folder, or a folder id
     };
   }
 
@@ -58,9 +59,22 @@ const CLM = (() => {
    * @param {{expand?: Map<string, string[]>}} [options]
    *   expand: raw tag key -> effective tag labels (Tag Merger "fold variants"):
    *   a card's effective tags are the union of its tags' expansions.
+   * @param {Array<{id: string, name: string, characterIds: string[]}>} [options.folders]
+   *   Marinara's character folders (character groups); a character can be in several.
    */
   function buildIndex(items, options = {}) {
     const expand = options.expand ?? null;
+    const folders = Array.isArray(options.folders) ? options.folders : [];
+    const folderOf = new Map(); // character id -> folder ids
+    for (const folder of folders) {
+      for (const id of folder.characterIds ?? []) {
+        const list = folderOf.get(id);
+        if (list) {
+          if (!list.includes(folder.id)) list.push(folder.id);
+        } else folderOf.set(id, [folder.id]);
+      }
+    }
+    const folderById = new Map(folders.map((f) => [f.id, { ...f, nameKey: normalizeTag(f.name ?? "") }]));
     const labelUses = new Map(); // key -> Map(label -> uses)
     const cards = [];
     const byId = new Map();
@@ -101,6 +115,8 @@ const CLM = (() => {
         created: toMs(item.createdAt),
         updated: toMs(item.updatedAt),
         tokens: Number.isFinite(item.tokenEstimate) ? item.tokenEstimate : 0,
+        folderIds: folderOf.get(item.id) ?? [],
+        folderText: (folderOf.get(item.id) ?? []).map((id) => folderById.get(id)?.nameKey ?? "").join("\n"),
       };
       cards.push(card);
       byId.set(card.id, card);
@@ -119,7 +135,13 @@ const CLM = (() => {
       }
       tags.set(key, { key, label, count });
     }
-    return { cards, byId, tags };
+    // Member counts only for characters that exist (folders can hold deleted ids).
+    const folderList = [...folderById.values()].map((f) => ({
+      ...f,
+      count: (f.characterIds ?? []).filter((id) => byId.has(id)).length,
+    }));
+    folderList.sort((a, b) => collator.compare(a.name ?? "", b.name ?? ""));
+    return { cards, byId, tags, folders: folderList, folderById: new Map(folderList.map((f) => [f.id, f])) };
   }
 
   // ── Search box syntax ──
@@ -131,10 +153,11 @@ const CLM = (() => {
   //   -#tag -tag:x    excluded tag
   //   ~tag  any:x     at least one of these tags
   //   creator:x       creator contains x       creator:"two words"
+  //   folder:x        in a folder whose name contains x            -folder:x  not in one
   //
   // Tag tokens become chips in the UI (takeTagTokens); the rest stays as text.
 
-  const TOKEN = /(-|!)?(#|~|tag:|any:|creator:)?(?:"([^"]*)"?|(\S+))/giu;
+  const TOKEN = /(-|!)?(#|~|tag:|any:|creator:|folder:)?(?:"([^"]*)"?|(\S+))/giu;
 
   /** @returns {Array<{kind: string, value: string, start: number, end: number, closed: boolean}>} */
   function tokenize(text) {
@@ -148,6 +171,7 @@ const CLM = (() => {
       if (prefix === "#" || prefix === "tag:") kind = neg ? "excluded" : "mandatory";
       else if (prefix === "~" || prefix === "any:") kind = neg ? "excluded" : "anyOf";
       else if (prefix === "creator:") kind = neg ? "notCreator" : "creator";
+      else if (prefix === "folder:") kind = neg ? "notFolder" : "folder";
       else kind = neg ? "notText" : "text";
       // A lone "-", "#" or "~" is a token still being typed.
       if ((kind === "text" || kind === "notText") && /^[-!#~"]*$/u.test(value)) continue;
@@ -162,7 +186,7 @@ const CLM = (() => {
    * the UI turns them into chips.
    */
   function parseSearch(text) {
-    const parsed = { words: [], notWords: [], mandatory: [], anyOf: [], excluded: [], creators: [], notCreators: [] };
+    const parsed = { words: [], notWords: [], mandatory: [], anyOf: [], excluded: [], creators: [], notCreators: [], folders: [], notFolders: [] };
     for (const token of tokenize(text)) {
       const key = normalizeTag(token.value);
       if (!key) continue;
@@ -170,6 +194,8 @@ const CLM = (() => {
       else if (token.kind === "notText") parsed.notWords.push(key);
       else if (token.kind === "creator") parsed.creators.push(key);
       else if (token.kind === "notCreator") parsed.notCreators.push(key);
+      else if (token.kind === "folder") parsed.folders.push(key);
+      else if (token.kind === "notFolder") parsed.notFolders.push(key);
       else parsed[token.kind].push(key);
     }
     return parsed;
@@ -236,7 +262,8 @@ const CLM = (() => {
     const words = parsed.words;
     const notWords = parsed.notWords;
     const useServer = serverIds !== null && words.length > 0;
-    const { creators, notCreators } = parsed;
+    const { creators, notCreators, folders, notFolders } = parsed;
+    const folder = query.folder ?? null;
     const created = query.created ?? {};
     const createdRange = { min: created.from ?? null, max: created.to ?? null };
 
@@ -259,6 +286,13 @@ const CLM = (() => {
       if (!inRange(card.created, createdRange)) return false;
       for (const c of creators) if (!card.creatorKey.includes(c)) return false;
       for (const c of notCreators) if (card.creatorKey.includes(c)) return false;
+      if (folder === "none") {
+        if (card.folderIds.length) return false;
+      } else if (folder === "some") {
+        if (!card.folderIds.length) return false;
+      } else if (folder !== null && !card.folderIds.includes(folder)) return false;
+      for (const f of folders) if (!card.folderText.includes(f)) return false;
+      for (const f of notFolders) if (card.folderText.includes(f)) return false;
       if (useServer) {
         if (!serverIds.has(card.id)) return false;
       } else if (words.length) {
@@ -393,6 +427,9 @@ const CLM = (() => {
       parsed.notWords.length +
       parsed.creators.length +
       parsed.notCreators.length +
+      parsed.folders.length +
+      parsed.notFolders.length +
+      Number(query.folder !== null && query.folder !== undefined) +
       Number(!!query.favoritesOnly) +
       Number(!!query.untaggedOnly) +
       Number(query.tagCount.min !== null || query.tagCount.max !== null) +
