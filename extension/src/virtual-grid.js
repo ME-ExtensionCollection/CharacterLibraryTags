@@ -11,7 +11,7 @@ const CLMVirtualGrid = (() => {
    * @param {HTMLElement} viewport scrolling element
    * @param {{
    *   gap: number,
-   *   size: () => { width: number, height: number },
+   *   size: () => { width: number, heightFor: (cellWidth: number) => number },
    *   create: (card) => HTMLElement,
    *   update: (node, card) => void,
    * }} options
@@ -31,14 +31,14 @@ const CLMVirtualGrid = (() => {
     const nodes = new Map(); // id -> node
 
     function layout() {
-      const { width, height } = options.size();
+      const { width, heightFor } = options.size();
+      // Columns come from the preferred width; cells then stretch to fill the row (as in ACM).
       const available = Math.max(0, viewport.clientWidth - options.gap);
       columns = Math.max(1, Math.floor(available / (width + options.gap)));
-      cellWidth = width;
-      cellHeight = height;
-      rowHeight = height + options.gap;
-      // Centre the block of columns.
-      offsetX = Math.max(0, Math.floor((available - columns * (width + options.gap)) / 2)) + options.gap;
+      cellWidth = Math.max(40, Math.floor(available / columns) - options.gap);
+      cellHeight = heightFor(cellWidth);
+      rowHeight = cellHeight + options.gap;
+      offsetX = options.gap;
       const rows = Math.ceil(items.length / columns);
       spacer.style.height = `${rows * rowHeight + options.gap}px`;
     }
@@ -97,6 +97,9 @@ const CLMVirtualGrid = (() => {
       relayout: schedule,
       get columns() {
         return columns;
+      },
+      get rowHeight() {
+        return rowHeight;
       },
       scrollToIndex(index) {
         if (index < 0 || index >= items.length) return;

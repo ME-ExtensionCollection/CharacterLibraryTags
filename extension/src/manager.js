@@ -641,7 +641,7 @@ const CLMManager = (() => {
 
     ui.grid = CLMVirtualGrid.create(viewport, {
       gap: GRID_GAP,
-      size: () => ({ width: S.cardWidth, height: Math.round(S.cardWidth * 1.5) + 46 }),
+      size: () => ({ width: S.cardWidth, heightFor: (w) => Math.round(w * 1.5) + 46 }),
       create: createCard,
       update: updateCard,
     });
@@ -732,7 +732,7 @@ const CLMManager = (() => {
     if (!S.results.length) return;
     const at = Math.max(0, S.results.findIndex((c) => c.id === S.selectedId));
     const cols = ui.grid.columns;
-    const page = Math.max(cols, Math.floor(ui.viewport.clientHeight / (S.cardWidth * 1.5 + 46 + GRID_GAP)) * cols);
+    const page = Math.max(cols, Math.floor(ui.viewport.clientHeight / ui.grid.rowHeight) * cols);
     const moves = {
       ArrowRight: 1,
       ArrowLeft: -1,
@@ -888,6 +888,9 @@ const CLMManager = (() => {
         ].filter(([, text]) => typeof text === "string" && text.trim());
         const alternates = Array.isArray(d.alternate_greetings) ? d.alternate_greetings.filter((g) => typeof g === "string" && g.trim()) : [];
         alternates.forEach((g, i) => sections.push([`Alternate greeting ${i + 1}`, g]));
+        // The catalog summary is usually the start of one of these; don't show it twice.
+        const snippet = (item.summary ?? "").trim().slice(0, 60);
+        if (snippet && sections.some(([, text]) => text.trim().startsWith(snippet))) summary.remove();
         drawers.replaceChildren(
           ...sections.map(([title, text], i) =>
             h(
