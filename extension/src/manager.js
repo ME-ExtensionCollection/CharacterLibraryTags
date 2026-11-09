@@ -899,6 +899,22 @@ const CLMManager = (() => {
     return chip;
   }
 
+  /** Full-size avatar over the manager; any click or key closes it. */
+  function showPreview(src, name) {
+    const preview = h("div.clm-preview", { attrs: { role: "dialog", "aria-label": `${name} avatar`, tabindex: "-1" } }, h("img", { attrs: { src, alt: name } }));
+    const closePreview = (event) => {
+      event?.stopPropagation();
+      preview.remove();
+    };
+    preview.addEventListener("click", closePreview);
+    preview.addEventListener("keydown", (e) => {
+      e.preventDefault();
+      closePreview(e);
+    });
+    ui.popup.append(preview);
+    preview.focus();
+  }
+
   function infoItem(label, value, title) {
     return h("div.clm-info", { attrs: { title: title ?? null } }, h("span.clm-info-label", { text: label }), h("span.clm-info-value", { text: value }));
   }
@@ -910,7 +926,10 @@ const CLMManager = (() => {
     if (!card) return;
     const item = card.item;
     const avatar = item.avatarPath
-      ? h("img.clm-details-avatar", { attrs: { src: item.avatarPath, alt: card.name, draggable: "false" } })
+      ? h("img.clm-details-avatar.clm-zoomable", {
+          attrs: { src: item.avatarPath, alt: card.name, draggable: "false", title: "Show full size" },
+          on: { click: () => showPreview(item.avatarPath, card.name) },
+        })
       : h("div.clm-details-avatar.clm-card-placeholder", { text: placeholder(card).textContent });
 
     const creator = card.creator

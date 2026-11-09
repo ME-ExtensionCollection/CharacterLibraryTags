@@ -216,6 +216,7 @@
 }
 
 .clm-popup {
+  position: relative;
   --clm-card-width: 130px;
   --clm-border: var(--border, rgb(255 255 255 / 0.15));
   --clm-accent: var(--primary, #ec4b97);
@@ -831,6 +832,29 @@
   object-fit: cover;
   border: 1px solid var(--clm-border);
   border-radius: 0.6rem;
+}
+
+.clm-zoomable {
+  cursor: zoom-in;
+}
+
+.clm-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(0 0 0 / 0.8);
+  cursor: zoom-out;
+}
+
+.clm-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 0.75rem;
+  box-shadow: 0 0 24px rgb(0 0 0 / 0.7);
 }
 
 .clm-details-main {
