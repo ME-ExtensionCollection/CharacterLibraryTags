@@ -25,11 +25,12 @@ const CLMBridge = (() => {
   // packages/client/src/components/characters/CharacterLibraryView.tsx
   const LIBRARY_ROOT = '[data-component="CharacterLibraryView"]';
   const MAX_FIBERS = 300000;
+  const ACTIONS = ["openCharacterDetail", "openModal"];
   const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
 
   // ── Finding Marinara's store and query client ──
 
-  let cached = { ui: null, queryClient: null };
+  let cached = { ui: null, queryClient: null, actions: {} };
 
   const isUiStore = (api) => {
     try {
@@ -54,7 +55,7 @@ const CLMBridge = (() => {
   }
 
   function scanFibers() {
-    const found = { ui: null, queryClient: null };
+    const found = { ui: null, queryClient: null, actions: {} };
     const root = reactRootFiber();
     if (!root) return found;
     const stack = [root];
@@ -70,6 +71,9 @@ const CLMBridge = (() => {
         while (hook && typeof hook === "object" && "next" in hook && guard < 200) {
           const value = hook.memoizedState;
           // useCallback(() => selector(api.getState()), [api, selector])
+          // useUIStore((s) => s.openModal) keeps the action itself; store actions are
+          // object-literal arrows, so their name survives minification.
+          if (typeof value === "function" && ACTIONS.includes(value.name)) found.actions[value.name] ??= value;
           const store = Array.isArray(value) && Array.isArray(value[1]) ? value[1].find(isUiStore) : null;
           if (store) {
             found.ui = store;
@@ -95,6 +99,7 @@ const CLMBridge = (() => {
         const found = scanFibers();
         if (!isUiStore(cached.ui)) cached.ui = found.ui;
         if (!isQueryClient(cached.queryClient)) cached.queryClient = found.queryClient;
+        cached.actions = { ...found.actions, ...cached.actions };
       } catch (error) {
         marinara.log.debug("Could not inspect Marinara's component tree", error);
       }
@@ -177,13 +182,14 @@ const CLMBridge = (() => {
 
   async function run(item, kind) {
     if (!item) return;
-    const { ui } = host();
+    const { ui, actions } = host();
+    const state = ui ? ui.getState() : actions;
+    const action = kind === "edit" ? state.openCharacterDetail : state.openModal;
     CLMManager.hide();
     try {
-      if (ui) {
-        const state = ui.getState();
-        if (kind === "edit") state.openCharacterDetail(item.id);
-        else state.openModal("start-character-chat", { characterId: item.id, characterName: item.name });
+      if (typeof action === "function") {
+        if (kind === "edit") action(item.id);
+        else action("start-character-chat", { characterId: item.id, characterName: item.name });
       } else {
         await viaLibrary(item, kind);
       }
@@ -230,7 +236,7 @@ const CLMBridge = (() => {
     document.removeEventListener("contextmenu", onContextMenu, true);
     hintObserver.disconnect();
     if (hintFrame) cancelAnimationFrame(hintFrame);
-    cached = { ui: null, queryClient: null };
+    cached = { ui: null, queryClient: null, actions: {} };
   });
 
   return Object.freeze({ edit, chat, findLibraryButton, refreshMarinaraLists, host });

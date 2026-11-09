@@ -25,13 +25,12 @@
     getQueryCache: () => ({}),
   };
   const selector = (s) => s.openModal;
-  const component = {
-    type: function CharactersPanel() {},
-    memoizedProps: {},
-    memoizedState: { memoizedState: false, next: { memoizedState: [() => selector(uiState), [uiStore, selector]], next: null } },
-    child: null,
-    sibling: null,
-  };
+  // ?react=actions: only the selected action functions are on the hooks (no store in deps).
+  const actionsOnly = new URLSearchParams(location.search).get("react") === "actions";
+  const hooks = actionsOnly
+    ? { memoizedState: uiState.openCharacterDetail, next: { memoizedState: uiState.openModal, next: null } }
+    : { memoizedState: false, next: { memoizedState: [() => selector(uiState), [uiStore, selector]], next: null } };
+  const component = { type: function CharactersPanel() {}, memoizedProps: {}, memoizedState: hooks, child: null, sibling: null };
   const provider = { type: function QueryClientProvider() {}, memoizedProps: { client: queryClient }, memoizedState: null, child: component, sibling: null };
   const hostRoot = { type: null, memoizedProps: null, memoizedState: { element: null }, child: provider, sibling: null };
   const root = document.createElement("div");

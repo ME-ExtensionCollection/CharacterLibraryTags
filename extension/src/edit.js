@@ -116,7 +116,7 @@ const CLMEdit = (() => {
     if (!list) {
       list = document.createElement("datalist");
       list.id = "clm-all-tags";
-      CLMManager.state.built && document.querySelector(".clm-popup")?.append(list);
+      document.body.append(list);
     }
     const sorted = [...tags.values()].sort((a, b) => b.count - a.count).slice(0, 3000);
     list.replaceChildren(...sorted.map((t) => Object.assign(document.createElement("option"), { value: t.label })));
@@ -181,5 +181,5 @@ const CLMEdit = (() => {
     document.getElementById("clm-all-tags")?.remove();
   });
 
-  return Object.freeze({ toast, removeTagButton, addTagField, favoriteButton, bulkTag });
+  return Object.freeze({ toast, removeTagButton, addTagField, favoriteButton, bulkTag, updateTagDatalist });
 })();

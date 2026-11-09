@@ -481,6 +481,14 @@ function mount(root, anchors) {
   });
   const badge = el("span", { className: "clt-toggle-badge", attrs: { hidden: "" } });
   toggle.append(createTagIcon(), badge);
+
+  // Opens the full-screen Character Manager (manager.js).
+  const managerButton = el("button", {
+    className: "mari-chrome-control clt-manager",
+    attrs: { type: "button", title: "Character Manager", "aria-label": "Character Manager" },
+  });
+  managerButton.append(CLMManager.icon("grid", "clt-toggle-icon"));
+  managerButton.addEventListener("click", () => void CLMManager.open());
   toggle.addEventListener("click", () => setPanelOpen(!view.open));
 
   const requiredField = createTagField({
@@ -528,6 +536,7 @@ function mount(root, anchors) {
     root,
     searchInput: null,
     toggle,
+    managerButton,
     badge,
     panel,
     fields: [requiredField, includeField, excludeField],
@@ -548,6 +557,7 @@ function attach({ searchInput, toolbar, headerRow, header }) {
   }
   // Left of the toolbar, in the header's empty space, so the toolbar keeps its width.
   if (view.toggle.nextElementSibling !== toolbar) headerRow.insertBefore(view.toggle, toolbar);
+  if (view.managerButton.nextElementSibling !== view.toggle) headerRow.insertBefore(view.managerButton, view.toggle);
   if (view.panel.parentElement !== header) header.append(view.panel);
 }
 
@@ -555,6 +565,7 @@ function unmount() {
   if (!view) return;
   view.searchInput?.removeEventListener("input", onSearchInput);
   view.toggle.remove();
+  view.managerButton.remove();
   view.panel.remove();
   view = null;
   includedTags.clear();

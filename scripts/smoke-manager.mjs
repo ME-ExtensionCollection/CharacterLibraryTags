@@ -247,4 +247,43 @@ export default async function ({ withPage, assert, BASE }) {
     },
     { query: "?react=1" },
   );
+
+  await withPage(
+    "manager-bridge-actions",
+    async (page) => {
+      await openManager(page);
+      await page.fill(".clm-search", "Alice in Chains");
+      await waitCount(page, 1);
+      await page.click('.clm-card[data-index="0"]');
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(() => window.__mockUi.events.some((e) => e.type === "store-edit"));
+    },
+    { query: "?react=actions" },
+  );
+
+  await withPage("manager-bulk-and-library-button", async (page) => {
+    page.on("dialog", (dialog) => dialog.accept());
+    // The grid button in the stock library opens the manager too.
+    await page.click("#mock-open-library");
+    await page.click(".clt-manager");
+    await page.waitForSelector(".clm-card");
+    await page.fill(".clm-search", "creator:kestrel");
+    const expected = expectCount({ text: "creator:kestrel" });
+    await waitCount(page, expected);
+    await page.click(".clm-btn[data-toggle=showAdvanced]");
+    await page.fill(".clm-bulk-tag", "Kestrel Pick");
+    await page.click(".clm-bulk button:has-text('Add tag')");
+    await page.waitForSelector(".clm-toast");
+    const tagged = async () => {
+      const [, body] = [null, await (await fetch(`${BASE}/api/characters/catalog?view=summary`)).json()];
+      return body.items.filter((i) => i.tags.includes("Kestrel Pick")).length;
+    };
+    assert.equal(await tagged(), expected);
+    await page.fill(".clm-search", "");
+    await addChip(page, "Mandatory", "Kestrel Pick");
+    await waitCount(page, expected);
+    await page.click(".clm-bulk button:has-text('Remove tag')");
+    await page.waitForFunction(() => document.querySelectorAll(".clm-toast").length >= 2);
+    assert.equal(await tagged(), 0);
+  });
 }

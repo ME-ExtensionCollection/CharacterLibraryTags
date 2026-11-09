@@ -1,6 +1,7 @@
 /* Character Library Tag Filter. Colors come from Marinara's chrome tokens so the UI follows the active theme. */
 
-.clt-toggle {
+.clt-toggle,
+.clt-manager {
   position: relative;
   flex: none;
   align-self: flex-start;
@@ -11,11 +12,20 @@
   border-radius: 1rem;
 }
 
+/* The manager button sits left of the tag toggle and takes the auto margin instead. */
+.clt-manager + .clt-toggle {
+  margin-left: 0.5rem;
+}
+
 /* In the wide header row the toggle takes the auto margin so it sits right next to the toolbar. */
 @media (min-width: 64rem) {
   .clt-toggle + .grid {
     margin-left: 0;
   }
+}
+
+.clt-manager {
+  justify-content: center;
 }
 
 .clt-toggle-icon {

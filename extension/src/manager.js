@@ -372,6 +372,26 @@ const CLMManager = (() => {
     });
   }
 
+  /** "Tag every result": add or remove one tag on all characters currently shown. */
+  function bulkTagGroup() {
+    const input = h("input.clm-input.clm-bulk-tag", {
+      attrs: { type: "text", placeholder: "tag", list: "clm-all-tags", autocomplete: "off", "aria-label": "Tag for every result" },
+    });
+    const run = (mode) => {
+      const label = input.value.trim();
+      if (!label) return input.focus();
+      void CLMEdit.bulkTag(S.results, mode, S.index.tags.get(CLM.normalizeTag(label))?.label ?? label);
+    };
+    return h(
+      "div.clm-adv-group.clm-bulk",
+      { attrs: { title: "Add or remove a tag on every character in the current results" } },
+      h("span.clm-label", { text: "All results:" }),
+      input,
+      h("button.clm-btn", { text: "Add tag", attrs: { type: "button" }, on: { click: () => run("add") } }),
+      h("button.clm-btn", { text: "Remove tag", attrs: { type: "button" }, on: { click: () => run("remove") } }),
+    );
+  }
+
   function toggleButton(name, title, key, onToggle) {
     const button = iconButton(name, title, () => {
       S[key] = !S[key];
@@ -585,6 +605,7 @@ const CLMManager = (() => {
         }),
         " Untagged only",
       ),
+      bulkTagGroup(),
     );
 
     // Body: tag cloud | grid, details below
@@ -998,6 +1019,7 @@ const CLMManager = (() => {
     ui.advanced.hidden = !S.showAdvanced;
     ui.cloud.hidden = !S.showCloud;
     if (S.showCloud) renderCloud();
+    if (S.showAdvanced) CLMEdit.updateTagDatalist();
 
     // Grid
     const scrollKey = JSON.stringify([q, S.sort, S.seed]);
