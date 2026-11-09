@@ -1,6 +1,38 @@
 # Character Library Tag Filter
 
-A Marinara Engine External Extension that adds tag filtering to the full Character Library (**Open Library**).
+A Marinara Engine External Extension with two parts:
+
+- A **Character Manager** window, modelled on SillyTavern's [AnotherCharManager](https://github.com/sakhavhyand/SillyTavern-AnotherCharManager). It searches and sorts the whole library in the browser, so any mix of tag filters and text search covers every character at once.
+- **Tag filters** inside Marinara's full Character Library (**Open Library**).
+
+## Character Manager
+
+Open it by **right-clicking Marinara's Open Library button** in the Characters panel (a left click still opens Marinara's library), or with the grid button next to the tag filter button in the full library. Esc or the × closes it, and your search, filters and selection are still there when you reopen it.
+
+**Searching**
+
+- **Search box** with a scope menu: *Name, creator & tags* (default), *Name*, *Creator*, *Tags*, or *All card text*. Every word must match. `"two words"` matches a phrase and `-word` excludes it. *All card text* uses Marinara's own catalog search, so it also reads descriptions, first messages, scenarios and creator notes.
+- **Tag rows**: *Mandatory tags* (must have all), *At least one tag* (must have one of them) and *Excluded tags* (must have none). They combine with each other and with the search box. Suggestions show how many characters in the current results have each tag, out of the whole library.
+- **Tag syntax in the search box**: `#tag` or `tag:"two words"` is mandatory, `-#tag` is excluded, `~tag` (or `any:tag`) is at least one, and `creator:name` filters by creator. A finished tag token turns into a chip in the matching row. Typing `#` shows tag suggestions.
+- **More filters** (sliders button): tag count range, token range, date added range, untagged only, and favorites (star button).
+- **Tag cloud** (# button): the most common tags in the current results. Click a tag to require it, Shift-click to add it to *At least one*, and Alt-click or right-click to exclude it. The same works on tags in the details pane.
+- **Tag Merger**: with [Tag Merger](../CharTagMerger) 0.1.1 or later running, *Canonical tags only* limits suggestions, the cloud and the details pane to canonical tags. *Match variant spellings* matches through Tag Merger's dictionary, so `Elf` also finds `elves` and anything that implies Elf.
+
+**Browsing**
+
+- Sort by name, tag count, date added, last updated, token estimate, creator, favorites first, or random (with a reshuffle button). The dice button picks a random character from the results.
+- The card grid only renders what is on screen, so large libraries scroll smoothly. The slider sets the card size.
+- Arrow keys, Page Up/Down, Home and End move the selection when the grid has focus, and `/` jumps to the search box.
+- The details pane shows the avatar, creator (click to list everything by them), version, dates, token estimate and tags, plus the description, first message, scenario, personality, creator notes and alternate greetings, loaded when you select the character.
+
+**Actions**
+
+- **Edit** (or double-click or Enter) opens Marinara's full-screen character editor. **Chat** opens Marinara's start-chat dialog. A notice then offers to go back to the manager.
+- **Favorite** toggles the favorite flag.
+- Add a tag with the *+ tag* field and remove one with its ×. Both offer Undo.
+- **All results** (under More filters) adds or removes one tag on every character in the current results, after a confirmation. Marinara saves a version of each card before its tags change.
+
+## Tag filters in the full library
 
 A tag button next to the library toolbar expands three fields:
 
@@ -18,7 +50,7 @@ Type in either field to get tag suggestions with character counts. Add a tag by 
 
 
 
-## How it works
+### How the library filters work
 
 - **Mandatory tags** are written into the library search box as `"Tag"` terms. Marinara treats every search term as a tag the character must have and filters on the server, so this covers characters that aren't loaded yet. Quoting keeps multi-word tags together.
 - **Excluded tags** are written into the search box as `-tag:"Tag"`, which is Marinara's own exclusion syntax.
@@ -26,6 +58,14 @@ Type in either field to get tag suggestions with character counts. Add a tag by 
 - **At least one tag** hides non-matching cards with an injected stylesheet, because Marinara's search has no any-of tag filter. The tag data comes from `GET /api/characters/catalog?view=summary`.
 - Filters reset every time the library opens, like Marinara's search box.
 - The persona library is left alone.
+
+## How the manager works
+
+- One request, `GET /api/characters/catalog?view=summary`, returns every character's name, creator, tags, dates, token estimate and avatar. The manager indexes it once and filters and sorts in the browser, so a keystroke is one pass over the index (about 3 ms for 20,000 characters).
+- Each time the manager opens, `catalogGeneration` is checked and the library is reloaded only if it changed. The refresh button forces a check.
+- *All card text* sends one `catalog?view=summary&search=…` request per word and intersects the results with the local filters.
+- Tag edits use `POST /api/characters/bulk-tags` and favorites use `PATCH /api/characters/:id`, the same endpoints Marinara uses.
+- Edit and Chat call Marinara's own UI actions (`openCharacterDetail` and `openModal("start-character-chat")`). Marinara does not publish these to page code, so the extension finds its UI store in React's component tree, where zustand keeps a reference to it. Marinara's query client is found the same way and refreshes Marinara's character lists after an edit. If neither can be found, the extension opens the stock library, searches for the character, and clicks its Edit or Chat now button.
 
 ## Install
 
@@ -39,6 +79,11 @@ The extension needs **Full page access**, because the sandboxed runtime can't re
 Every code change disables the extension until you review and approve the new hash.
 
 ## Limitations
+
+- The fiber lookup depends on Marinara using React and zustand the way it does now. If an update changes that, Edit and Chat fall back to driving the stock library, and Marinara's lists may show old tags until they refetch.
+- *All card text* matches each word separately, and Marinara's search treats a word that exactly matches a tag as that tag, so a search word can also match characters that only have it as a tag.
+
+The library tag filters:
 
 - Once a mandatory tag is set, every other word in the search box also counts as a required tag. For example, `alice "elf"` only matches characters tagged both `alice` and `elf`, not characters named Alice. The panel warns when this happens.
 - **At least one tag** can only hide cards that are already loaded. Marinara loads the next page on its own while the list is short, and the panel shows how many matching characters exist in total.
