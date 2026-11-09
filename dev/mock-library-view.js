@@ -38,7 +38,7 @@
     const text = state.search.replace(/(?:^|\s)(?:-|!)(?:tag:|#)?(?:"[^"]+"|\S+)/g, " ").trim();
     if (text) params.set("search", text);
     const page = await (await fetch(`/api/characters/catalog?${params}`)).json();
-    if (token !== state.token) return;
+    if (token !== state.token || !libraryRoot) return;
     state.items = reset ? page.items : [...state.items, ...page.items];
     state.hasMore = page.hasMore;
     state.total = page.total;

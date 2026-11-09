@@ -1,0 +1,1177 @@
+// Character Manager: a full-screen character browser modelled on SillyTavern's
+// AnotherCharManager. Everything is filtered and sorted in the browser from
+// the catalog summary (CLMData + CLM), so mandatory / any-of / excluded tags,
+// text scopes and sorts combine freely and cover the whole library at once.
+//
+// Open it by right-clicking Marinara's "Open Library" button, or with the
+// grid button next to the tag filter in the full Character Library.
+
+const CLMManager = (() => {
+  "use strict";
+
+  const PREFS_KEY = "managerPrefs";
+  const CARD_WIDTH = { min: 80, max: 240, step: 10, initial: 130 };
+  const GRID_GAP = 10;
+  const SERVER_SEARCH_DELAY = 300;
+  const DETAIL_DELAY = 120;
+  const CLOUD_LIMIT = 80;
+  const SVG_NS = "http://www.w3.org/2000/svg";
+
+  // Lucide icon geometry (https://lucide.dev, ISC).
+  const ICONS = {
+    tag: [
+      ["path", { d: "M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" }],
+      ["circle", { cx: "7.5", cy: "7.5", r: ".5", fill: "currentColor" }],
+    ],
+    star: [["path", { d: "M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z" }]],
+    dice: [
+      ["rect", { x: "3", y: "3", width: "18", height: "18", rx: "2" }],
+      ["path", { d: "M16 8h.01M8 8h.01M8 16h.01M16 16h.01M12 12h.01" }],
+    ],
+    shuffle: [["path", { d: "m18 14 4 4-4 4M18 2l4 4-4 4M2 18h1.973a4 4 0 0 0 3.3-1.7l5.454-8.6a4 4 0 0 1 3.3-1.7H22M2 6h1.972a4 4 0 0 1 3.6 2.2M22 18h-6.041a4 4 0 0 1-3.3-1.8l-.359-.45" }]],
+    x: [["path", { d: "M18 6 6 18M6 6l12 12" }]],
+    refresh: [["path", { d: "M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8M21 3v5h-5" }]],
+    sliders: [["path", { d: "M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" }]],
+    hash: [["path", { d: "M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" }]],
+    search: [
+      ["circle", { cx: "11", cy: "11", r: "8" }],
+      ["path", { d: "m21 21-4.3-4.3" }],
+    ],
+    pencil: [["path", { d: "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" }]],
+    chat: [["path", { d: "M7.9 20A9 9 0 1 0 4 16.1L2 22Z" }]],
+    user: [
+      ["path", { d: "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" }],
+      ["circle", { cx: "12", cy: "7", r: "4" }],
+    ],
+    grid: [
+      ["rect", { x: "3", y: "3", width: "7", height: "7", rx: "1" }],
+      ["rect", { x: "14", y: "3", width: "7", height: "7", rx: "1" }],
+      ["rect", { x: "14", y: "14", width: "7", height: "7", rx: "1" }],
+      ["rect", { x: "3", y: "14", width: "7", height: "7", rx: "1" }],
+    ],
+    chevron: [["path", { d: "m6 9 6 6 6-6" }]],
+    plus: [["path", { d: "M5 12h14M12 5v14" }]],
+  };
+
+  function icon(name, className = "clm-icon") {
+    const svg = document.createElementNS(SVG_NS, "svg");
+    for (const [k, v] of Object.entries({
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-width": "2",
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+      "aria-hidden": "true",
+      class: className,
+    }))
+      svg.setAttribute(k, v);
+    for (const [tag, attrs] of ICONS[name]) {
+      const child = document.createElementNS(SVG_NS, tag);
+      for (const [k, v] of Object.entries(attrs)) child.setAttribute(k, v);
+      svg.append(child);
+    }
+    return svg;
+  }
+
+  /** Small element builder: h("div.a.b", { attrs, on, text }, ...children). */
+  function h(spec, props = {}, ...children) {
+    const [tag, ...classes] = spec.split(".");
+    const node = document.createElement(tag || "div");
+    if (classes.length) node.className = classes.join(" ");
+    const { text, on, attrs, ...rest } = props;
+    if (text !== undefined) node.textContent = text;
+    for (const [k, v] of Object.entries(attrs ?? {})) if (v !== null && v !== undefined && v !== false) node.setAttribute(k, v === true ? "" : v);
+    for (const [k, v] of Object.entries(on ?? {})) node.addEventListener(k, v);
+    Object.assign(node, rest);
+    for (const child of children.flat()) if (child !== null && child !== undefined && child !== false) node.append(child);
+    return node;
+  }
+
+  function iconButton(name, title, onClick, extraClass = "") {
+    return h(
+      `button.clm-btn.clm-icon-btn${extraClass ? `.${extraClass}` : ""}`,
+      { attrs: { type: "button", title, "aria-label": title }, on: { click: onClick } },
+      icon(name),
+    );
+  }
+
+  const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
+  const formatDate = (ms) => (ms ? dateFormat.format(new Date(ms)) : "—");
+  const formatTokens = (n) => (n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+  const plural = (n, one, many = `${one}s`) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
+
+  // ── State ──
+
+  const S = {
+    built: false,
+    open: false,
+    query: CLM.emptyQuery(),
+    labels: new Map(), // tag key -> label typed by the user (for tags not in the index)
+    sort: "name-asc",
+    seed: 1,
+    cardWidth: CARD_WIDTH.initial,
+    showTagRows: true,
+    showAdvanced: false,
+    showCloud: false,
+    canonicalOnly: false,
+    foldVariants: false,
+    canonical: null, // Set of canonical tag keys (Tag Merger)
+    expand: null, // Map for fold variants (Tag Merger)
+    index: CLM.buildIndex([]),
+    indexedItems: null,
+    results: [],
+    facets: new Map(),
+    serverKey: "",
+    serverIds: null,
+    serverError: "",
+    selectedId: null,
+    loadError: "",
+    loading: false,
+    detailsDirty: false,
+  };
+
+  const ui = {}; // DOM references, filled by build()
+  let renderFrame = 0;
+  let serverTimer = 0;
+  let detailTimer = 0;
+  let detailToken = 0;
+  let prefsTimer = 0;
+  let unsubscribe = null;
+
+  // ── Preferences (marinara.storage) ──
+
+  async function loadPrefs() {
+    try {
+      const saved = (await marinara.storage.get())?.[PREFS_KEY];
+      if (!saved || typeof saved !== "object") return;
+      if (saved.sort in CLM.SORTS) S.sort = saved.sort;
+      if (CLM.SCOPES.includes(saved.scope)) S.query.scope = saved.scope;
+      if (Number.isFinite(saved.cardWidth)) {
+        S.cardWidth = Math.min(CARD_WIDTH.max, Math.max(CARD_WIDTH.min, saved.cardWidth));
+      }
+      for (const key of ["showTagRows", "showAdvanced", "showCloud", "canonicalOnly", "foldVariants"]) {
+        if (typeof saved[key] === "boolean") S[key] = saved[key];
+      }
+    } catch (error) {
+      marinara.log.warn("Could not read Character Manager preferences", error);
+    }
+  }
+
+  function savePrefs() {
+    marinara.clearTimeout(prefsTimer);
+    prefsTimer = marinara.setTimeout(() => {
+      const prefs = {
+        sort: S.sort,
+        scope: S.query.scope,
+        cardWidth: S.cardWidth,
+        showTagRows: S.showTagRows,
+        showAdvanced: S.showAdvanced,
+        showCloud: S.showCloud,
+        canonicalOnly: S.canonicalOnly,
+        foldVariants: S.foldVariants,
+      };
+      marinara.storage.patch({ [PREFS_KEY]: prefs }).catch((error) => marinara.log.warn("Could not save preferences", error));
+    }, 400);
+  }
+
+  // ── Tags helpers ──
+
+  const labelOf = (key) => S.index.tags.get(key)?.label ?? S.labels.get(key) ?? key;
+  const chipKeys = () => new Set([...S.query.mandatory, ...S.query.anyOf, ...S.query.excluded]);
+  /** Canonical-only mode hides other tags from suggestions, the cloud and card chips. */
+  function visibleTag(key) {
+    if (!S.canonicalOnly || !S.canonical || S.canonical.size === 0) return true;
+    return S.canonical.has(key) || chipKeys().has(key);
+  }
+  const visibleFilter = () => (S.canonicalOnly && S.canonical?.size ? visibleTag : null);
+
+  function addChip(kind, label) {
+    const key = CLM.normalizeTag(String(label).replace(/^#+/u, ""));
+    if (!key) return;
+    for (const other of ["mandatory", "anyOf", "excluded"]) {
+      S.query[other] = S.query[other].filter((k) => k !== key);
+    }
+    S.query[kind] = [...S.query[kind], key];
+    if (!S.index.tags.has(key)) S.labels.set(key, String(label).trim());
+    update();
+  }
+
+  function removeChip(kind, key) {
+    S.query[kind] = S.query[kind].filter((k) => k !== key);
+    update();
+  }
+
+  /** Click on a tag anywhere: plain = mandatory (toggle), Shift = any-of, Alt/Ctrl/right = exclude. */
+  function tagClick(event, key) {
+    event.preventDefault();
+    event.stopPropagation();
+    const kind = event.type === "contextmenu" || event.altKey || event.ctrlKey || event.metaKey ? "excluded" : event.shiftKey ? "anyOf" : "mandatory";
+    if (S.query[kind].includes(key)) removeChip(kind, key);
+    else addChip(kind, labelOf(key));
+  }
+
+  const TAG_CLICK_HINT = "Click: must have · Shift-click: at least one · Alt-click or right-click: exclude";
+
+  // ── Suggestion dropdown (shared by the tag rows and the search box) ──
+
+  function attachSuggest(input, wrapper, { compute, pick, onKey }) {
+    const list = h("ul.clm-suggest", { attrs: { role: "listbox", hidden: true } });
+    wrapper.append(list);
+    let items = [];
+    let active = -1;
+
+    function render() {
+      const open = document.activeElement === input && items.length > 0;
+      list.replaceChildren(
+        ...items.map((item, i) =>
+          h(
+            "li.clm-suggest-item",
+            {
+              attrs: { role: "option", "aria-selected": String(i === active) },
+              on: { click: () => choose(i) },
+            },
+            h("span.clm-suggest-label", { text: item.label }),
+            h("span.clm-suggest-count", {
+              text: item.matching === item.count ? String(item.count) : `${item.matching} / ${item.count}`,
+              attrs: { title: `${item.matching} in current results, ${item.count} in the library` },
+            }),
+          ),
+        ),
+      );
+      list.hidden = !open;
+      input.setAttribute("aria-expanded", String(open));
+      if (open && active >= 0) list.children[active]?.scrollIntoView({ block: "nearest" });
+    }
+
+    function refresh() {
+      items = compute() ?? [];
+      active = items.length ? 0 : -1;
+      render();
+    }
+
+    function choose(i) {
+      const item = items[i];
+      if (!item) return;
+      pick(item);
+      refresh();
+    }
+
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-autocomplete", "list");
+    input.addEventListener("input", refresh);
+    input.addEventListener("focus", refresh);
+    input.addEventListener("blur", () => {
+      list.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+    });
+    list.addEventListener("pointerdown", (event) => event.preventDefault());
+    input.addEventListener("keydown", (event) => {
+      const open = !list.hidden && items.length > 0;
+      if (open && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+        event.preventDefault();
+        active = (active + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+        render();
+        return;
+      }
+      if (open && (event.key === "Enter" || event.key === "Tab") && active >= 0 && !event.shiftKey) {
+        event.preventDefault();
+        choose(active);
+        return;
+      }
+      if (open && event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        items = [];
+        render();
+        return;
+      }
+      onKey?.(event);
+    });
+    return { refresh, close: () => ((items = []), render()) };
+  }
+
+  // ── Tag rows (ACM "Mandatory / At least one / Excluded") ──
+
+  function chipField(kind, labelText, chipClass) {
+    const input = h("input.clm-chip-input", {
+      attrs: { type: "text", autocomplete: "off", spellcheck: "false", "aria-label": labelText, placeholder: "Add tag…" },
+    });
+    const chips = h("span.clm-chips");
+    const box = h("div.clm-chip-box", { on: { click: (e) => e.target === box && input.focus() } }, chips, input);
+    const suggest = attachSuggest(input, box, {
+      compute: () =>
+        CLM.suggestTags(S.index.tags, input.value, { facets: S.facets, taken: chipKeys(), visible: visibleFilter(), limit: 12 }),
+      pick: (item) => {
+        input.value = "";
+        addChip(kind, item.label);
+      },
+      onKey: (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          if (input.value.trim()) {
+            addChip(kind, input.value.trim());
+            input.value = "";
+          }
+        } else if (event.key === "Backspace" && input.value === "" && S.query[kind].length) {
+          removeChip(kind, S.query[kind][S.query[kind].length - 1]);
+        }
+      },
+    });
+    const row = h(
+      "div.clm-tag-row",
+      {},
+      h("label.clm-tag-row-label", { text: labelText }),
+      box,
+    );
+    return {
+      row,
+      render() {
+        chips.replaceChildren(
+          ...S.query[kind].map((key) =>
+            h(
+              `span.clm-chip.${chipClass}`,
+              {},
+              h("span.clm-chip-label", { text: labelOf(key) }),
+              h("button.clm-chip-remove", {
+                text: "×",
+                attrs: { type: "button", title: `Remove ${labelOf(key)}`, "aria-label": `Remove ${labelOf(key)}` },
+                on: {
+                  click: (e) => {
+                    e.stopPropagation();
+                    removeChip(kind, key);
+                  },
+                },
+              }),
+            ),
+          ),
+        );
+        if (document.activeElement === input) suggest.refresh();
+      },
+    };
+  }
+
+  // ── Build ──
+
+  function numberInput(placeholder, onChange) {
+    return h("input.clm-input.clm-number", {
+      attrs: { type: "number", min: "0", placeholder, inputmode: "numeric" },
+      on: {
+        input: (e) => {
+          const v = e.target.value.trim();
+          onChange(v === "" ? null : Math.max(0, Number(v)));
+        },
+      },
+    });
+  }
+
+  function dateInput(label, onChange) {
+    return h("input.clm-input.clm-date", {
+      attrs: { type: "date", "aria-label": label, title: label },
+      on: { change: (e) => onChange(e.target.value ? Date.parse(e.target.value) : null) },
+    });
+  }
+
+  function toggleButton(name, title, key, onToggle) {
+    const button = iconButton(name, title, () => {
+      S[key] = !S[key];
+      onToggle?.();
+      savePrefs();
+      update();
+    });
+    button.dataset.toggle = key;
+    return button;
+  }
+
+  function build() {
+    // Toolbar
+    const sortSelect = h(
+      "select.clm-select",
+      {
+        attrs: { title: "Sort order", "aria-label": "Sort order" },
+        on: {
+          change: (e) => {
+            S.sort = e.target.value;
+            savePrefs();
+            update({ resetScroll: true });
+          },
+        },
+      },
+      Object.entries(CLM.SORTS).map(([value, label]) => h("option", { text: label, value })),
+    );
+    const reshuffle = iconButton("shuffle", "Shuffle again", () => {
+      S.seed = (S.seed * 48271 + 1) % 2147483647;
+      update({ resetScroll: true });
+    });
+    const scopeSelect = h(
+      "select.clm-select.clm-scope",
+      {
+        attrs: { title: "Search in", "aria-label": "Search in" },
+        on: {
+          change: (e) => {
+            S.query.scope = e.target.value;
+            savePrefs();
+            update();
+          },
+        },
+      },
+      [
+        ["any", "Name, creator & tags"],
+        ["name", "Name"],
+        ["creator", "Creator"],
+        ["tags", "Tags"],
+        ["all", "All card text"],
+      ].map(([value, label]) => h("option", { text: label, value })),
+    );
+    const searchInput = h("input.clm-input.clm-search", {
+      attrs: {
+        type: "search",
+        placeholder: "Search…  #tag  -#tag  ~tag  creator:name",
+        autocomplete: "off",
+        spellcheck: "false",
+        "aria-label": "Search characters",
+        title:
+          'Words must all match. "two words" matches a phrase, -word excludes.\n#tag or tag:"two words" = must have, -#tag = exclude, ~tag = at least one.\ncreator:name filters by creator.',
+      },
+    });
+    const searchWrap = h("div.clm-search-wrap", {}, icon("search", "clm-icon clm-search-icon"), searchInput);
+    attachSuggest(searchInput, searchWrap, {
+      compute: () => {
+        const token = currentTagToken(searchInput);
+        if (!token) return [];
+        return CLM.suggestTags(S.index.tags, token.value, { facets: S.facets, taken: chipKeys(), visible: visibleFilter(), limit: 10 });
+      },
+      pick: (item) => {
+        const token = currentTagToken(searchInput);
+        if (!token) return;
+        const value = searchInput.value;
+        searchInput.value = `${value.slice(0, token.start)}${value.slice(token.end)}`.replace(/\s{2,}/gu, " ").trimStart();
+        addChip(token.kind, item.label);
+        S.query.text = searchInput.value;
+        update();
+      },
+      onKey: (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          absorbTagTokens(true);
+        }
+      },
+    });
+    searchInput.addEventListener("input", () => {
+      absorbTagTokens(false);
+    });
+
+    const favButton = iconButton("star", "Favorites only", () => {
+      S.query.favoritesOnly = !S.query.favoritesOnly;
+      update();
+    });
+    const count = h("span.clm-count", { attrs: { "aria-live": "polite" } });
+    const clearButton = h("button.clm-btn.clm-clear", {
+      text: "Clear",
+      attrs: { type: "button", title: "Clear search and every filter" },
+      on: { click: clearAll },
+    });
+    const widthSlider = h("input.clm-width", {
+      attrs: {
+        type: "range",
+        min: String(CARD_WIDTH.min),
+        max: String(CARD_WIDTH.max),
+        step: String(CARD_WIDTH.step),
+        title: "Card size",
+        "aria-label": "Card size",
+      },
+      on: {
+        input: (e) => {
+          S.cardWidth = Number(e.target.value);
+          ui.popup.style.setProperty("--clm-card-width", `${S.cardWidth}px`);
+          savePrefs();
+          ui.grid.relayout();
+        },
+      },
+    });
+
+    const toolbar = h(
+      "div.clm-toolbar",
+      {},
+      h(
+        "div.clm-toolbar-group",
+        {},
+        toggleButton("tag", "Tag filters", "showTagRows"),
+        toggleButton("sliders", "More filters", "showAdvanced"),
+        toggleButton("hash", "Tag cloud", "showCloud"),
+      ),
+      h("div.clm-toolbar-group", {}, h("span.clm-label", { text: "Sorted by" }), sortSelect, reshuffle),
+      h("div.clm-toolbar-group.clm-grow", {}, scopeSelect, searchWrap),
+      h(
+        "div.clm-toolbar-group",
+        {},
+        favButton,
+        iconButton("dice", "Random character", pickRandom),
+        iconButton("refresh", "Reload the library", () => void refresh(true)),
+        widthSlider,
+      ),
+      h("div.clm-toolbar-group.clm-toolbar-end", {}, count, clearButton, iconButton("x", "Close (Esc)", close, "clm-close")),
+    );
+
+    // Tag rows
+    const fields = [
+      chipField("mandatory", "Mandatory tags:", "clm-chip--mandatory"),
+      chipField("anyOf", "At least one tag:", "clm-chip--any"),
+      chipField("excluded", "Excluded tags:", "clm-chip--excluded"),
+    ];
+    const canonicalBox = h("input", {
+      attrs: { type: "checkbox" },
+      on: {
+        change: async (e) => {
+          S.canonicalOnly = e.target.checked;
+          savePrefs();
+          await loadTagMerger();
+          update();
+        },
+      },
+    });
+    const foldBox = h("input", {
+      attrs: { type: "checkbox" },
+      on: {
+        change: async (e) => {
+          S.foldVariants = e.target.checked;
+          savePrefs();
+          await loadTagMerger();
+          rebuildIndex();
+          update();
+        },
+      },
+    });
+    const canonicalLabel = h("label.clm-check", { attrs: { title: "" } }, canonicalBox, " Canonical tags only");
+    const foldLabel = h("label.clm-check", {}, foldBox, " Match variant spellings");
+    const tagMergerRow = h("div.clm-tagmerger", {}, h("span.clm-label", { text: "Tag Merger:" }), canonicalLabel, foldLabel);
+    const tagRows = h("div.clm-tag-rows", {}, ...fields.map((f) => f.row), tagMergerRow);
+
+    // Advanced filters
+    const advanced = h(
+      "div.clm-advanced",
+      {},
+      h(
+        "div.clm-adv-group",
+        {},
+        h("span.clm-label", { text: "Tags" }),
+        numberInput("min", (v) => ((S.query.tagCount = { ...S.query.tagCount, min: v }), update())),
+        h("span", { text: "–" }),
+        numberInput("max", (v) => ((S.query.tagCount = { ...S.query.tagCount, max: v }), update())),
+      ),
+      h(
+        "div.clm-adv-group",
+        {},
+        h("span.clm-label", { text: "Tokens" }),
+        numberInput("min", (v) => ((S.query.tokens = { ...S.query.tokens, min: v }), update())),
+        h("span", { text: "–" }),
+        numberInput("max", (v) => ((S.query.tokens = { ...S.query.tokens, max: v }), update())),
+      ),
+      h(
+        "div.clm-adv-group",
+        {},
+        h("span.clm-label", { text: "Added" }),
+        dateInput("Added on or after", (v) => ((S.query.created = { ...S.query.created, from: v }), update())),
+        h("span", { text: "–" }),
+        // Inclusive end date: the whole day counts.
+        dateInput("Added on or before", (v) => ((S.query.created = { ...S.query.created, to: v === null ? null : v + 86399999 }), update())),
+      ),
+      h(
+        "label.clm-check",
+        {},
+        h("input", {
+          attrs: { type: "checkbox" },
+          on: { change: (e) => ((S.query.untaggedOnly = e.target.checked), update()) },
+        }),
+        " Untagged only",
+      ),
+    );
+
+    // Body: tag cloud | grid, details below
+    const cloud = h("aside.clm-cloud", { attrs: { "aria-label": "Tags in results", title: TAG_CLICK_HINT } });
+    const viewport = h("div.clm-grid", { attrs: { tabindex: "0", role: "listbox", "aria-label": "Characters" } });
+    const empty = h("div.clm-empty", { attrs: { hidden: true } });
+    const gridWrap = h("div.clm-grid-wrap", {}, viewport, empty);
+    const details = h("section.clm-details", { attrs: { hidden: true, "aria-label": "Character details" } });
+    const body = h("div.clm-body", {}, cloud, gridWrap, details);
+
+    const popup = h(
+      "div.clm-popup",
+      { attrs: { role: "dialog", "aria-modal": "true", "aria-label": "Character Manager" } },
+      toolbar,
+      tagRows,
+      advanced,
+      body,
+    );
+    const lock = h("div.clm-lock", { attrs: { hidden: true } }, popup);
+    lock.addEventListener("pointerdown", (event) => {
+      if (event.target === lock) close();
+    });
+    // Keep Marinara's global shortcuts out of the manager while it is open.
+    lock.addEventListener("keydown", onKeyDown);
+    lock.addEventListener("keyup", (e) => e.stopPropagation());
+    lock.addEventListener("keypress", (e) => e.stopPropagation());
+    document.body.append(lock);
+
+    Object.assign(ui, {
+      lock,
+      popup,
+      toolbar,
+      sortSelect,
+      reshuffle,
+      scopeSelect,
+      searchInput,
+      favButton,
+      count,
+      clearButton,
+      widthSlider,
+      fields,
+      tagRows,
+      tagMergerRow,
+      canonicalBox,
+      foldBox,
+      canonicalLabel,
+      foldLabel,
+      advanced,
+      cloud,
+      viewport,
+      empty,
+      details,
+    });
+
+    ui.grid = CLMVirtualGrid.create(viewport, {
+      gap: GRID_GAP,
+      size: () => ({ width: S.cardWidth, height: Math.round(S.cardWidth * 1.5) + 46 }),
+      create: createCard,
+      update: updateCard,
+    });
+    viewport.addEventListener("click", onGridClick);
+    viewport.addEventListener("dblclick", onGridDoubleClick);
+    viewport.addEventListener("keydown", onGridKey);
+    S.built = true;
+  }
+
+  // ── Search box tokens ──
+
+  /** The tag token under the caret (#…, ~…, -#…, tag:…, any:…), for suggestions. */
+  function currentTagToken(input) {
+    const caret = input.selectionStart ?? input.value.length;
+    for (const token of CLM.tokenize(input.value)) {
+      if (token.start <= caret && caret <= token.end && ["mandatory", "anyOf", "excluded"].includes(token.kind)) {
+        return token;
+      }
+    }
+    return null;
+  }
+
+  /** Turn finished tag tokens in the search box into chips. */
+  function absorbTagTokens(final) {
+    const value = ui.searchInput.value;
+    const { chips, rest } = CLM.takeTagTokens(value, final);
+    if (chips.length) {
+      ui.searchInput.value = rest;
+      for (const chip of chips) addChip(chip.kind, chip.label);
+    }
+    S.query.text = ui.searchInput.value;
+    update();
+  }
+
+  // ── Cards ──
+
+  function createCard(card) {
+    const node = h("div.clm-card", { attrs: { role: "option", "data-id": card.id } });
+    const media = h("div.clm-card-media");
+    const avatar = card.item.avatarPath;
+    if (avatar) {
+      const img = h("img", { attrs: { alt: "", loading: "lazy", decoding: "async", draggable: "false" } });
+      img.addEventListener("error", () => img.replaceWith(placeholder(card)), { once: true });
+      img.src = avatar;
+      media.append(img);
+    } else {
+      media.append(placeholder(card));
+    }
+    const star = h("span.clm-card-fav", { attrs: { title: "Favorite" } }, icon("star"));
+    const name = h("div.clm-card-name");
+    const meta = h("div.clm-card-meta");
+    node.append(media, star, name, meta);
+    return node;
+  }
+
+  function placeholder(card) {
+    return h("div.clm-card-placeholder", { text: (card.name.match(/\p{L}|\p{N}/u)?.[0] ?? "?").toUpperCase() });
+  }
+
+  function updateCard(node, card, index) {
+    if (node.dataset.index !== String(index)) {
+      node.dataset.index = String(index);
+      node.setAttribute("aria-posinset", String(index + 1));
+      node.setAttribute("aria-setsize", String(S.results.length));
+    }
+    const name = node.children[2];
+    if (name.textContent !== card.name) name.textContent = card.name;
+    name.style.color = card.item.nameColor ?? "";
+    const meta = `${plural(card.tagCount, "tag")} · ${formatTokens(card.tokens)} tok`;
+    if (node.children[3].textContent !== meta) node.children[3].textContent = meta;
+    node.title = card.creator ? `${card.name}\nby ${card.creator}` : card.name;
+    node.classList.toggle("clm-card--selected", card.id === S.selectedId);
+    node.classList.toggle("clm-card--fav", card.favorite);
+    node.setAttribute("aria-selected", String(card.id === S.selectedId));
+  }
+
+  function onGridClick(event) {
+    const node = event.target.closest(".clm-card");
+    if (node) select(node.dataset.id);
+  }
+
+  function onGridDoubleClick(event) {
+    const node = event.target.closest(".clm-card");
+    if (node) void CLMBridge.edit(S.index.byId.get(node.dataset.id)?.item);
+  }
+
+  function onGridKey(event) {
+    if (!S.results.length) return;
+    const at = Math.max(0, S.results.findIndex((c) => c.id === S.selectedId));
+    const cols = ui.grid.columns;
+    const page = Math.max(cols, Math.floor(ui.viewport.clientHeight / (S.cardWidth * 1.5 + 46 + GRID_GAP)) * cols);
+    const moves = {
+      ArrowRight: 1,
+      ArrowLeft: -1,
+      ArrowDown: cols,
+      ArrowUp: -cols,
+      PageDown: page,
+      PageUp: -page,
+      Home: -Infinity,
+      End: Infinity,
+    };
+    if (event.key in moves) {
+      event.preventDefault();
+      const next = S.selectedId === null ? 0 : Math.min(S.results.length - 1, Math.max(0, at + moves[event.key]));
+      select(S.results[next].id, { scroll: true });
+    } else if (event.key === "Enter" && S.selectedId) {
+      event.preventDefault();
+      void CLMBridge.edit(S.index.byId.get(S.selectedId)?.item);
+    }
+  }
+
+  function select(id, { scroll = false } = {}) {
+    S.selectedId = id;
+    ui.grid.refresh();
+    if (scroll) ui.grid.scrollToIndex(S.results.findIndex((c) => c.id === id));
+    renderDetails();
+  }
+
+  function pickRandom() {
+    if (!S.results.length) return;
+    const card = S.results[Math.floor(Math.random() * S.results.length)];
+    select(card.id, { scroll: true });
+  }
+
+  // ── Details pane ──
+
+  function tagChip(key, { card = null } = {}) {
+    const inQuery = S.query.mandatory.includes(key)
+      ? "clm-chip--mandatory"
+      : S.query.anyOf.includes(key)
+        ? "clm-chip--any"
+        : S.query.excluded.includes(key)
+          ? "clm-chip--excluded"
+          : "";
+    const chip = h(
+      `span.clm-chip.clm-chip--tag${inQuery ? `.${inQuery}` : ""}`,
+      {
+        attrs: { title: TAG_CLICK_HINT, tabindex: "0", role: "button" },
+        on: {
+          click: (e) => tagClick(e, key),
+          contextmenu: (e) => tagClick(e, key),
+          keydown: (e) => e.key === "Enter" && tagClick(e, key),
+        },
+      },
+      h("span.clm-chip-label", { text: labelOf(key) }),
+    );
+    if (card) {
+      const remove = CLMEdit.removeTagButton(card, key);
+      if (remove) chip.append(remove);
+    }
+    return chip;
+  }
+
+  function infoItem(label, value, title) {
+    return h("div.clm-info", { attrs: { title: title ?? null } }, h("span.clm-info-label", { text: label }), h("span.clm-info-value", { text: value }));
+  }
+
+  function renderDetails() {
+    const card = S.selectedId ? S.index.byId.get(S.selectedId) : null;
+    ui.details.hidden = !card;
+    ui.popup.classList.toggle("clm-has-details", !!card);
+    if (!card) return;
+    const item = card.item;
+    const avatar = item.avatarPath
+      ? h("img.clm-details-avatar", { attrs: { src: item.avatarPath, alt: card.name, draggable: "false" } })
+      : h("div.clm-details-avatar.clm-card-placeholder", { text: placeholder(card).textContent });
+
+    const creator = card.creator
+      ? h("button.clm-link", {
+          text: card.creator,
+          attrs: { type: "button", title: "Show everything by this creator" },
+          on: {
+            click: () => {
+              ui.searchInput.value = CLM.quoteToken("creator:", card.creator);
+              S.query.text = ui.searchInput.value;
+              update({ resetScroll: true });
+            },
+          },
+        })
+      : h("span.clm-muted", { text: "unknown creator" });
+
+    const shownTags = card.tagList.filter((key) => visibleTag(key));
+    const hiddenCount = card.tagList.length - shownTags.length;
+    const tags = h(
+      "div.clm-details-tags",
+      {},
+      shownTags.map((key) => tagChip(key, { card })),
+      hiddenCount ? h("span.clm-muted", { text: `+${hiddenCount} non-canonical`, attrs: { title: card.tagList.filter((k) => !visibleTag(k)).map(labelOf).join(", ") } }) : null,
+      CLMEdit.addTagField(card),
+    );
+
+    const actions = h(
+      "div.clm-details-actions",
+      {},
+      CLMEdit.favoriteButton(card),
+      h("button.clm-btn", { attrs: { type: "button", title: "Open Marinara's character editor" }, on: { click: () => void CLMBridge.edit(item) } }, icon("pencil"), " Edit"),
+      h("button.clm-btn", { attrs: { type: "button", title: "Start a chat with this character" }, on: { click: () => void CLMBridge.chat(item) } }, icon("chat"), " Chat"),
+    );
+
+    const drawers = h("div.clm-drawers");
+    const summary = h("p.clm-details-summary", { text: item.summary ?? "" });
+
+    ui.details.replaceChildren(
+      h(
+        "div.clm-details-head",
+        {},
+        avatar,
+        h(
+          "div.clm-details-main",
+          {},
+          h("div.clm-details-title", {}, h("h2.clm-details-name", { text: card.name, attrs: { style: item.nameColor ? `color:${item.nameColor}` : null } }), h("span.clm-muted", { text: " by " }), creator),
+          h(
+            "div.clm-info-grid",
+            {},
+            infoItem("Version", item.version || "—"),
+            infoItem("Added", formatDate(card.created), item.createdAt),
+            infoItem("Updated", formatDate(card.updated), item.updatedAt),
+            infoItem("Tokens", `~${card.tokens.toLocaleString()}`, "Marinara's estimate for the whole card"),
+            infoItem("Tags", String(card.rawTagCount)),
+          ),
+          actions,
+          tags,
+        ),
+        iconButton("x", "Close details", () => select(null), "clm-details-close"),
+      ),
+      summary,
+      drawers,
+    );
+
+    // Full text is loaded lazily, after the selection settles.
+    const token = ++detailToken;
+    marinara.clearTimeout(detailTimer);
+    detailTimer = marinara.setTimeout(async () => {
+      try {
+        const full = await CLMData.getCharacter(card.id);
+        if (token !== detailToken) return;
+        const d = full.data ?? {};
+        const sections = [
+          ["Description", d.description],
+          ["First message", d.first_mes],
+          ["Scenario", d.scenario],
+          ["Personality", d.personality],
+          ["Creator's notes", d.creator_notes],
+        ].filter(([, text]) => typeof text === "string" && text.trim());
+        const alternates = Array.isArray(d.alternate_greetings) ? d.alternate_greetings.filter((g) => typeof g === "string" && g.trim()) : [];
+        alternates.forEach((g, i) => sections.push([`Alternate greeting ${i + 1}`, g]));
+        drawers.replaceChildren(
+          ...sections.map(([title, text], i) =>
+            h(
+              "details.clm-drawer",
+              { open: i === 0 },
+              h("summary", {}, h("span", { text: title }), h("span.clm-muted", { text: ` ~${marinaraTokens(text)} tok` })),
+              h("div.clm-drawer-text", { text }),
+            ),
+          ),
+        );
+      } catch (error) {
+        if (token !== detailToken) return;
+        drawers.replaceChildren(h("p.clm-error", { text: `Could not load the full card: ${error.message}` }));
+      }
+    }, DETAIL_DELAY);
+  }
+
+  const marinaraTokens = (text) =>
+    typeof marinara.estimateTextTokens === "function" ? marinara.estimateTextTokens(text).toLocaleString() : Math.ceil(text.length / 4).toLocaleString();
+
+  // ── Compute & render ──
+
+  function rebuildIndex() {
+    const expand = S.foldVariants ? S.expand : null;
+    S.index = CLM.buildIndex(CLMData.items, { expand });
+    S.indexedItems = CLMData.items;
+  }
+
+  function scheduleServerSearch() {
+    const terms = CLM.serverTerms(S.query);
+    const key = terms.join("\n");
+    if (key === S.serverKey) return;
+    S.serverKey = key;
+    S.serverIds = null;
+    S.serverError = "";
+    marinara.clearTimeout(serverTimer);
+    if (!terms.length) return;
+    serverTimer = marinara.setTimeout(async () => {
+      try {
+        const ids = await CLMData.searchAllTerms(terms);
+        if (S.serverKey !== key) return;
+        S.serverIds = ids;
+      } catch (error) {
+        if (S.serverKey !== key) return;
+        S.serverError = error.message;
+      }
+      update();
+    }, SERVER_SEARCH_DELAY);
+  }
+
+  let lastScrollKey = "";
+
+  function compute() {
+    if (S.indexedItems !== CLMData.items) rebuildIndex();
+    scheduleServerSearch();
+    const filtered = CLM.filter(S.index, S.query, { serverIds: S.serverIds });
+    S.results = CLM.sortCards(filtered, S.sort, S.seed);
+    S.facets = CLM.facetCounts(S.results);
+  }
+
+  function update({ resetScroll = false } = {}) {
+    if (!S.built) return;
+    if (resetScroll) lastScrollKey = "";
+    if (!renderFrame) renderFrame = requestAnimationFrame(render);
+  }
+
+  function render() {
+    renderFrame = 0;
+    if (!S.open) return;
+    compute();
+    const q = S.query;
+
+    // Toolbar state
+    ui.sortSelect.value = S.sort;
+    ui.reshuffle.hidden = S.sort !== "random";
+    ui.scopeSelect.value = q.scope;
+    if (document.activeElement !== ui.searchInput && ui.searchInput.value !== q.text) ui.searchInput.value = q.text;
+    ui.favButton.classList.toggle("clm-on", q.favoritesOnly);
+    ui.favButton.setAttribute("aria-pressed", String(q.favoritesOnly));
+    for (const button of ui.toolbar.querySelectorAll("[data-toggle]")) {
+      const key = button.dataset.toggle;
+      if (key in S && typeof S[key] === "boolean") {
+        button.classList.toggle("clm-on", S[key]);
+        button.setAttribute("aria-pressed", String(S[key]));
+      }
+    }
+    ui.widthSlider.value = String(S.cardWidth);
+    ui.popup.style.setProperty("--clm-card-width", `${S.cardWidth}px`);
+
+    const active = CLM.activeFilterCount(q);
+    const total = S.index.cards.length;
+    let status = S.loading && !total ? "Loading…" : `${S.results.length.toLocaleString()} of ${plural(total, "character")}`;
+    if (q.scope === "all" && CLM.serverTerms(q).length) {
+      status += S.serverError ? " · text search failed" : S.serverIds === null ? " · searching card text…" : "";
+    }
+    if (S.loadError) status = S.loadError;
+    ui.count.textContent = status;
+    ui.count.title = S.serverError || S.loadError || "";
+    ui.clearButton.hidden = active === 0;
+
+    // Rows
+    ui.tagRows.hidden = !S.showTagRows;
+    for (const field of ui.fields) field.render();
+    renderTagMergerRow();
+    ui.advanced.hidden = !S.showAdvanced;
+    ui.cloud.hidden = !S.showCloud;
+    if (S.showCloud) renderCloud();
+
+    // Grid
+    const scrollKey = JSON.stringify([q, S.sort, S.seed]);
+    const keepScroll = scrollKey === lastScrollKey;
+    lastScrollKey = scrollKey;
+    ui.grid.setItems(S.results, { keepScroll });
+    ui.empty.hidden = S.results.length > 0 || (S.loading && !total);
+    if (!ui.empty.hidden) {
+      ui.empty.textContent = total ? "No characters match these filters." : S.loadError || "Your library is empty.";
+    }
+    if (S.selectedId && !S.index.byId.has(S.selectedId)) S.selectedId = null;
+    if (S.detailsDirty) {
+      S.detailsDirty = false;
+      if (S.selectedId) renderDetails();
+    }
+    if (!S.selectedId) {
+      ui.details.hidden = true;
+      ui.popup.classList.remove("clm-has-details");
+    }
+  }
+
+  function renderCloud() {
+    const top = CLM.topTags(S.index.tags, S.facets, { limit: CLOUD_LIMIT, exclude: chipKeys(), visible: visibleFilter() });
+    const max = top[0]?.matching ?? 1;
+    ui.cloud.replaceChildren(
+      h("div.clm-cloud-title", { text: "Tags in results" }),
+      ...top.map((t) =>
+        h(
+          "button.clm-cloud-tag",
+          {
+            attrs: { type: "button", title: `${t.matching} of ${t.count} · ${TAG_CLICK_HINT}`, style: `--clm-weight:${(0.35 + 0.65 * (t.matching / max)).toFixed(2)}` },
+            on: { click: (e) => tagClick(e, t.key), contextmenu: (e) => tagClick(e, t.key) },
+          },
+          h("span", { text: t.label }),
+          h("span.clm-cloud-count", { text: String(t.matching) }),
+        ),
+      ),
+    );
+  }
+
+  function renderTagMergerRow() {
+    const status = CLMData.tagMerger();
+    ui.canonicalBox.checked = S.canonicalOnly;
+    ui.foldBox.checked = S.foldVariants;
+    ui.canonicalBox.disabled = !status.available;
+    ui.foldBox.disabled = !status.available;
+    const reason = status.available ? "" : status.reason;
+    ui.canonicalLabel.title = reason || "Show only Tag Merger's canonical tags in suggestions, the tag cloud and the details pane.";
+    ui.foldLabel.title = reason || "Match tags through Tag Merger's dictionary, so a canonical tag also finds its variant spellings and implied tags.";
+    ui.tagMergerRow.classList.toggle("clm-disabled", !status.available);
+  }
+
+  async function loadTagMerger() {
+    if (!CLMData.tagMerger().available) {
+      S.canonical = null;
+      S.expand = null;
+      return;
+    }
+    try {
+      if (S.canonicalOnly) S.canonical = await CLMData.canonicalKeys(CLM.normalizeTag);
+      if (S.foldVariants) S.expand = await CLMData.tagExpansion(CLM.normalizeTag);
+    } catch (error) {
+      marinara.log.warn("Could not read Tag Merger's dictionary", error);
+    }
+  }
+
+  function clearAll() {
+    const scope = S.query.scope;
+    S.query = { ...CLM.emptyQuery(), scope };
+    S.labels.clear();
+    ui.searchInput.value = "";
+    for (const input of ui.advanced.querySelectorAll("input")) {
+      if (input.type === "checkbox") input.checked = false;
+      else input.value = "";
+    }
+    update({ resetScroll: true });
+  }
+
+  // ── Open / close ──
+
+  async function refresh(force) {
+    S.loading = true;
+    S.loadError = "";
+    update();
+    try {
+      if (force || CLMData.loaded) await CLMData.revalidate();
+      else await CLMData.load();
+      if (S.foldVariants && CLMData.tagMerger().available) S.expand = await CLMData.tagExpansion(CLM.normalizeTag);
+      rebuildIndex();
+    } catch (error) {
+      S.loadError = `Could not load characters: ${error.message}`;
+      marinara.log.error("Character Manager could not load the library", error);
+    } finally {
+      S.loading = false;
+      update();
+    }
+  }
+
+  async function open() {
+    if (S.open) return;
+    if (!S.built) {
+      await loadPrefs();
+      build();
+    }
+    S.open = true;
+    ui.lock.hidden = false;
+    unsubscribe ??= CLMData.subscribe(() => {
+      S.detailsDirty = true;
+      update();
+    });
+    update();
+    ui.searchInput.focus();
+    await loadTagMerger();
+    await refresh(false);
+  }
+
+  function close() {
+    if (!S.open) return;
+    S.open = false;
+    ui.lock.hidden = true;
+    marinara.clearTimeout(detailTimer);
+  }
+
+  /** Hide without losing state (the bridge uses this while Marinara's own UI opens). */
+  const hide = close;
+  const show = () => void open();
+
+  function onKeyDown(event) {
+    event.stopPropagation();
+    if (event.key === "Escape" && !event.defaultPrevented) {
+      event.preventDefault();
+      if (S.selectedId && document.activeElement === ui.viewport) select(null);
+      else close();
+      return;
+    }
+    if (event.key === "/" && !/^(INPUT|TEXTAREA|SELECT)$/u.test(document.activeElement?.tagName ?? "")) {
+      event.preventDefault();
+      ui.searchInput.focus();
+    }
+  }
+
+  // Tag Merger tells other extensions when its dictionary changes.
+  const onTagMergerChanged = () => {
+    if (!S.open) return;
+    void loadTagMerger().then(() => {
+      if (S.foldVariants) rebuildIndex();
+      update();
+    });
+  };
+  window.addEventListener("marinara-tag-merger:changed", onTagMergerChanged);
+
+  marinara.onCleanup(() => {
+    window.removeEventListener("marinara-tag-merger:changed", onTagMergerChanged);
+    unsubscribe?.();
+    if (renderFrame) cancelAnimationFrame(renderFrame);
+    marinara.clearTimeout(serverTimer);
+    marinara.clearTimeout(detailTimer);
+    marinara.clearTimeout(prefsTimer);
+    ui.grid?.destroy();
+    ui.lock?.remove();
+  });
+
+  return Object.freeze({
+    open,
+    close,
+    hide,
+    show,
+    update,
+    select,
+    renderDetails,
+    get isOpen() {
+      return S.open;
+    },
+    get state() {
+      return S;
+    },
+    icon,
+    h,
+  });
+})();

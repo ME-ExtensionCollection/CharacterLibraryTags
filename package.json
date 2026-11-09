@@ -1,6 +1,6 @@
 {
   "name": "marinara-character-library",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "description": "Marinara Engine extension: tag filters and an ACM-style character manager for the Character Library.",
   "type": "module",

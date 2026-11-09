@@ -68,7 +68,7 @@ createServer(async (req, res) => {
     return sendJson(res, result[0], result[1]);
   }
   // Rebuild on every harness load so edits show up after a refresh.
-  if (url.pathname === "/dev/build/page-runtime.js") {
+  if (url.pathname === "/dev/harness.html") {
     try {
       build();
     } catch (error) {

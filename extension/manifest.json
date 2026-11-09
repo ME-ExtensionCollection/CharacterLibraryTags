@@ -3,11 +3,21 @@
   "version": 1,
   "config": {
     "name": "Character Library Tag Filter",
-    "version": "0.3.1",
-    "description": "Adds mandatory (all-of), include (any-of) and exclude tag filters with autocomplete to the full Character Library.",
+    "version": "0.4.0",
+    "description": "Tag filters for the full Character Library, plus a full-screen Character Manager (right-click Open Library) with mandatory / any-of / excluded tags, text and full-text search, more sorts, tag cloud and tag editing.",
     "runtime": "client",
-    "capabilities": ["full_page_access"],
-    "jsPath": ["src/core.js", "src/data.js", "src/filter-panel.js"],
+    "capabilities": [
+      "full_page_access"
+    ],
+    "jsPath": [
+      "src/core.js",
+      "src/data.js",
+      "src/virtual-grid.js",
+      "src/edit.js",
+      "src/manager.js",
+      "src/bridge.js",
+      "src/filter-panel.js"
+    ],
     "cssPath": "extension.css"
   }
 }
