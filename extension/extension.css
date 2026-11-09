@@ -244,6 +244,7 @@
   display: none !important;
 }
 
+.clm-popup,
 .clm-popup *,
 .clm-popup *::before,
 .clm-popup *::after {
@@ -1002,7 +1003,9 @@
     grid-column: 1;
   }
 
-  .clm-has-details .clm-body {
+  .clm-has-details .clm-grid-wrap,
+  .clm-has-details .clm-tag-rows,
+  .clm-has-details .clm-advanced {
     display: none;
   }
 
