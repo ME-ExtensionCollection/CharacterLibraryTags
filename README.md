@@ -16,7 +16,7 @@ Open it by **right-clicking Marinara's Open Library button** in the Characters p
 - **Tag syntax in the search box**: `#tag` or `tag:"two words"` is mandatory, `-#tag` is excluded, `~tag` (or `any:tag`) is at least one, and `creator:name` filters by creator. A finished tag token turns into a chip in the matching row. Typing `#` shows tag suggestions.
 - **More filters** (sliders button): tag count range, token range, date added range, untagged only, and favorites (star button).
 - **Tag cloud** (# button): the most common tags in the current results. Click a tag to require it, Shift-click to add it to *At least one*, and Alt-click or right-click to exclude it. The same works on tags in the details pane.
-- **Tag Merger**: with [Tag Merger](../CharTagMerger) 0.1.1 or later running, *Canonical tags only* limits suggestions, the cloud and the details pane to canonical tags. *Match variant spellings* matches through Tag Merger's dictionary, so `Elf` also finds `elves` and anything that implies Elf.
+- **Tag Merger**: with Tag Merger 0.1.1 or later running, *Canonical tags only* limits suggestions, the cloud and the details pane to canonical tags. *Match variant spellings* matches through Tag Merger's dictionary, so `Elf` also finds `elves` and anything that implies Elf.
 
 **Browsing**
 
