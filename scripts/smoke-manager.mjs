@@ -286,4 +286,32 @@ export default async function ({ withPage, assert, BASE }) {
     await page.waitForFunction(() => document.querySelectorAll(".clm-toast").length >= 2);
     assert.equal(await tagged(), 0);
   });
+
+  await withPage("manager-saved-searches", async (page) => {
+    page.on("dialog", (dialog) => dialog.accept("Female elves"));
+    await page.evaluate(() => window.__clmHarness.resetStorage());
+    await openManager(page);
+    await addChip(page, "Mandatory", "female");
+    await addChip(page, "At least one", "elf");
+    await page.click(".clm-btn[data-toggle=showAdvanced]");
+    await page.fill(".clm-advanced .clm-number >> nth=0", "5");
+    const expected = expectCount({ mandatory: ["female"], anyOf: ["elf"], tagCount: { min: 5, max: null } });
+    await waitCount(page, expected);
+    await page.selectOption(".clm-presets", "save");
+    await page.waitForFunction(() => [...document.querySelectorAll(".clm-presets option")].some((o) => o.textContent === "Female elves"));
+    await page.click(".clm-clear");
+    await waitCount(page, 3005);
+    assert.equal(await page.inputValue(".clm-advanced .clm-number >> nth=0"), "");
+    await page.selectOption(".clm-presets", "load:0");
+    await waitCount(page, expected);
+    assert.equal(await page.inputValue(".clm-advanced .clm-number >> nth=0"), "5");
+    // Saved searches survive a reload.
+    await page.reload();
+    await page.waitForSelector("#mock-open-library");
+    await openManager(page);
+    await page.selectOption(".clm-presets", "load:0");
+    await waitCount(page, expected);
+    await page.selectOption(".clm-presets", "delete:0");
+    await page.waitForFunction(() => ![...document.querySelectorAll(".clm-presets option")].some((o) => o.textContent === "Female elves"));
+  });
 }

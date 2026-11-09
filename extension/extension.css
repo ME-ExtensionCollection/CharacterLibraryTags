@@ -388,6 +388,10 @@
   padding-left: 1.9rem;
 }
 
+.clm-presets {
+  max-width: 11rem;
+}
+
 .clm-width {
   width: 6rem;
   accent-color: var(--clm-accent);

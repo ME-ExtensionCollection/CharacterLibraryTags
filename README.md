@@ -15,6 +15,7 @@ Open it by **right-clicking Marinara's Open Library button** in the Characters p
 - **Tag rows**: *Mandatory tags* (must have all), *At least one tag* (must have one of them) and *Excluded tags* (must have none). They combine with each other and with the search box. Suggestions show how many characters in the current results have each tag, out of the whole library.
 - **Tag syntax in the search box**: `#tag` or `tag:"two words"` is mandatory, `-#tag` is excluded, `~tag` (or `any:tag`) is at least one, and `creator:name` filters by creator. A finished tag token turns into a chip in the matching row. Typing `#` shows tag suggestions.
 - **More filters** (sliders button): tag count range, token range, date added range, untagged only, and favorites (star button).
+- **Saved searches**: the menu next to the search box saves the current search, tag rows, filters and sort under a name, loads it again, or deletes it. They are kept in the extension's storage.
 - **Tag cloud** (# button): the most common tags in the current results. Click a tag to require it, Shift-click to add it to *At least one*, and Alt-click or right-click to exclude it. The same works on tags in the details pane.
 - **Tag Merger**: with Tag Merger 0.1.1 or later running, *Canonical tags only* limits suggestions, the cloud and the details pane to canonical tags. *Match variant spellings* matches through Tag Merger's dictionary, so `Elf` also finds `elves` and anything that implies Elf.
 

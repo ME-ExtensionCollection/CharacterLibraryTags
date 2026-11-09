@@ -10,6 +10,7 @@ const CLMManager = (() => {
   "use strict";
 
   const PREFS_KEY = "managerPrefs";
+  const PRESETS_KEY = "savedSearches";
   const CARD_WIDTH = { min: 80, max: 240, step: 10, initial: 130 };
   const GRID_GAP = 10;
   const SERVER_SEARCH_DELAY = 300;
@@ -129,6 +130,7 @@ const CLMManager = (() => {
     loadError: "",
     loading: false,
     detailsDirty: false,
+    presets: [], // [{ name, query, sort, labels }]
   };
 
   const ui = {}; // DOM references, filled by build()
@@ -143,7 +145,9 @@ const CLMManager = (() => {
 
   async function loadPrefs() {
     try {
-      const saved = (await marinara.storage.get())?.[PREFS_KEY];
+      const stored = await marinara.storage.get();
+      if (Array.isArray(stored?.[PRESETS_KEY])) S.presets = stored[PRESETS_KEY].filter((p) => p && typeof p.name === "string" && p.query);
+      const saved = stored?.[PREFS_KEY];
       if (!saved || typeof saved !== "object") return;
       if (saved.sort in CLM.SORTS) S.sort = saved.sort;
       if (CLM.SCOPES.includes(saved.scope)) S.query.scope = saved.scope;
@@ -173,6 +177,58 @@ const CLMManager = (() => {
       };
       marinara.storage.patch({ [PREFS_KEY]: prefs }).catch((error) => marinara.log.warn("Could not save preferences", error));
     }, 400);
+  }
+
+  // ── Saved searches (ACM presets) ──
+
+  const sameQuery = (preset) => JSON.stringify(preset.query) === JSON.stringify(S.query) && preset.sort === S.sort;
+
+  function renderPresets() {
+    const select = ui.presetSelect;
+    const current = S.presets.find(sameQuery);
+    const options = [h("option", { text: S.presets.length ? "Saved searches…" : "Save search…", value: "" })];
+    for (const [i, preset] of S.presets.entries()) options.push(h("option", { text: preset.name, value: `load:${i}` }));
+    options.push(h("option", { text: "Save current search…", value: "save" }));
+    if (current) options.push(h("option", { text: `Delete “${current.name}”`, value: `delete:${S.presets.indexOf(current)}` }));
+    const signature = options.map((o) => `${o.value}=${o.textContent}`).join("|");
+    if (select.dataset.signature !== signature) {
+      select.replaceChildren(...options);
+      select.dataset.signature = signature;
+    }
+    select.value = current ? `load:${S.presets.indexOf(current)}` : "";
+  }
+
+  function savePresets() {
+    marinara.storage.patch({ [PRESETS_KEY]: S.presets }).catch((error) => CLMEdit.toast(`Could not save: ${error.message}`, { error: true }));
+  }
+
+  function onPresetChoice(select) {
+    const [action, index] = select.value.split(":");
+    select.value = "";
+    if (action === "load") {
+      const preset = S.presets[Number(index)];
+      if (!preset) return;
+      S.query = { ...CLM.emptyQuery(), ...structuredClone(preset.query) };
+      if (preset.sort in CLM.SORTS) S.sort = preset.sort;
+      for (const [key, label] of Object.entries(preset.labels ?? {})) S.labels.set(key, label);
+      ui.searchInput.value = S.query.text;
+      update({ resetScroll: true });
+    } else if (action === "save") {
+      const name = window.prompt("Name for this search:", "")?.trim();
+      if (!name) return update();
+      const labels = {};
+      for (const key of chipKeys()) labels[key] = labelOf(key);
+      const preset = { name, query: structuredClone(S.query), sort: S.sort, labels };
+      const existing = S.presets.findIndex((p) => p.name === name);
+      if (existing >= 0) S.presets[existing] = preset;
+      else S.presets.push(preset);
+      savePresets();
+      update();
+    } else if (action === "delete") {
+      S.presets.splice(Number(index), 1);
+      savePresets();
+      update();
+    } else update();
   }
 
   // ── Tags helpers ──
@@ -353,6 +409,25 @@ const CLMManager = (() => {
 
   // ── Build ──
 
+  // Inputs whose value mirrors query state, refreshed on render (saved searches, Clear).
+  const boundInputs = [];
+  function bound(input, read) {
+    boundInputs.push({ input, read });
+    return input;
+  }
+  const isoDay = (ms) => (ms === null || ms === undefined ? "" : new Date(ms).toISOString().slice(0, 10));
+  function syncBoundInputs() {
+    for (const { input, read } of boundInputs) {
+      if (document.activeElement === input) continue;
+      const value = read();
+      if (input.type === "checkbox") input.checked = !!value;
+      else {
+        const text = value === null || value === undefined ? "" : String(value);
+        if (input.value !== text) input.value = text;
+      }
+    }
+  }
+
   function numberInput(placeholder, onChange) {
     return h("input.clm-input.clm-number", {
       attrs: { type: "number", min: "0", placeholder, inputmode: "numeric" },
@@ -486,6 +561,10 @@ const CLMManager = (() => {
       update();
     });
     const count = h("span.clm-count", { attrs: { "aria-live": "polite" } });
+    const presetSelect = h("select.clm-select.clm-presets", {
+      attrs: { title: "Saved searches", "aria-label": "Saved searches" },
+      on: { change: (e) => onPresetChoice(e.target) },
+    });
     const clearButton = h("button.clm-btn.clm-clear", {
       text: "Clear",
       attrs: { type: "button", title: "Clear search and every filter" },
@@ -521,7 +600,7 @@ const CLMManager = (() => {
         toggleButton("hash", "Tag cloud", "showCloud"),
       ),
       h("div.clm-toolbar-group", {}, h("span.clm-label", { text: "Sorted by" }), sortSelect, reshuffle),
-      h("div.clm-toolbar-group.clm-grow", {}, scopeSelect, searchWrap),
+      h("div.clm-toolbar-group.clm-grow", {}, scopeSelect, searchWrap, presetSelect),
       h(
         "div.clm-toolbar-group",
         {},
@@ -575,34 +654,37 @@ const CLMManager = (() => {
         "div.clm-adv-group",
         {},
         h("span.clm-label", { text: "Tags" }),
-        numberInput("min", (v) => ((S.query.tagCount = { ...S.query.tagCount, min: v }), update())),
+        bound(numberInput("min", (v) => ((S.query.tagCount = { ...S.query.tagCount, min: v }), update())), () => S.query.tagCount.min),
         h("span", { text: "–" }),
-        numberInput("max", (v) => ((S.query.tagCount = { ...S.query.tagCount, max: v }), update())),
+        bound(numberInput("max", (v) => ((S.query.tagCount = { ...S.query.tagCount, max: v }), update())), () => S.query.tagCount.max),
       ),
       h(
         "div.clm-adv-group",
         {},
         h("span.clm-label", { text: "Tokens" }),
-        numberInput("min", (v) => ((S.query.tokens = { ...S.query.tokens, min: v }), update())),
+        bound(numberInput("min", (v) => ((S.query.tokens = { ...S.query.tokens, min: v }), update())), () => S.query.tokens.min),
         h("span", { text: "–" }),
-        numberInput("max", (v) => ((S.query.tokens = { ...S.query.tokens, max: v }), update())),
+        bound(numberInput("max", (v) => ((S.query.tokens = { ...S.query.tokens, max: v }), update())), () => S.query.tokens.max),
       ),
       h(
         "div.clm-adv-group",
         {},
         h("span.clm-label", { text: "Added" }),
-        dateInput("Added on or after", (v) => ((S.query.created = { ...S.query.created, from: v }), update())),
+        bound(dateInput("Added on or after", (v) => ((S.query.created = { ...S.query.created, from: v }), update())), () => isoDay(S.query.created.from)),
         h("span", { text: "–" }),
         // Inclusive end date: the whole day counts.
-        dateInput("Added on or before", (v) => ((S.query.created = { ...S.query.created, to: v === null ? null : v + 86399999 }), update())),
+        bound(dateInput("Added on or before", (v) => ((S.query.created = { ...S.query.created, to: v === null ? null : v + 86399999 }), update())), () => isoDay(S.query.created.to)),
       ),
       h(
         "label.clm-check",
         {},
-        h("input", {
-          attrs: { type: "checkbox" },
-          on: { change: (e) => ((S.query.untaggedOnly = e.target.checked), update()) },
-        }),
+        bound(
+          h("input", {
+            attrs: { type: "checkbox" },
+            on: { change: (e) => ((S.query.untaggedOnly = e.target.checked), update()) },
+          }),
+          () => S.query.untaggedOnly,
+        ),
         " Untagged only",
       ),
       bulkTagGroup(),
@@ -642,6 +724,7 @@ const CLMManager = (() => {
       reshuffle,
       scopeSelect,
       searchInput,
+      presetSelect,
       favButton,
       count,
       clearButton,
@@ -999,6 +1082,8 @@ const CLMManager = (() => {
       }
     }
     ui.widthSlider.value = String(S.cardWidth);
+    syncBoundInputs();
+    renderPresets();
     ui.popup.style.setProperty("--clm-card-width", `${S.cardWidth}px`);
 
     const active = CLM.activeFilterCount(q);
@@ -1091,10 +1176,6 @@ const CLMManager = (() => {
     S.query = { ...CLM.emptyQuery(), scope };
     S.labels.clear();
     ui.searchInput.value = "";
-    for (const input of ui.advanced.querySelectorAll("input")) {
-      if (input.type === "checkbox") input.checked = false;
-      else input.value = "";
-    }
     update({ resetScroll: true });
   }
 
