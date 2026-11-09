@@ -232,9 +232,10 @@ const CLMData = (() => {
         : await Promise.all(inputs.map((tags) => api.mapTags(tags)));
     const expand = new Map();
     keys.forEach((key, i) => {
-      const { canonical = [], other = [] } = mapped[i] ?? {};
-      const out = [...canonical, ...other];
-      expand.set(key, out.length ? out : [labels.get(key)]);
+      // Keep the library's own spelling for tags no canonical claims
+      // (mapTags would also tidy those, e.g. drop emoji).
+      const { canonical = [] } = mapped[i] ?? {};
+      expand.set(key, canonical.length ? canonical : [labels.get(key)]);
     });
     return expand;
   }
