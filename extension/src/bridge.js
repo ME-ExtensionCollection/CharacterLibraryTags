@@ -208,11 +208,20 @@ const CLMBridge = (() => {
 
   // ── Launcher ──
 
+  /** The top bar's Characters button (packages/client/src/components/layout/TopBar.tsx). */
+  const TOPBAR_CHARACTERS = '[data-tour="panel-characters"]';
+
+  /** Buttons whose right-click opens the manager: top-bar Characters and the panel's Open Library. */
+  function isLauncher(button) {
+    if (!button) return false;
+    if (button.matches(TOPBAR_CHARACTERS)) return true;
+    const actions = button.closest(LIBRARY_ACTIONS);
+    return !!actions && button === findLibraryButton(actions);
+  }
+
   function onContextMenu(event) {
-    const actions = event.target.closest?.(LIBRARY_ACTIONS);
-    if (!actions) return;
-    const button = event.target.closest("button");
-    if (!button || button !== findLibraryButton(actions)) return;
+    const button = event.target.closest?.("button");
+    if (!isLauncher(button)) return;
     event.preventDefault();
     event.stopPropagation();
     void CLMManager.open();
@@ -222,8 +231,9 @@ const CLMBridge = (() => {
   // Hint on the stock button so the right-click is discoverable.
   const HINT = " (right-click: Character Manager)";
   function markLauncher() {
-    const button = findLibraryButton();
-    if (button && !button.title.endsWith(HINT)) button.title = `${button.title}${HINT}`;
+    for (const button of [findLibraryButton(), ...document.querySelectorAll(`button${TOPBAR_CHARACTERS}`)]) {
+      if (button && !button.title.endsWith(HINT)) button.title = `${button.title}${HINT}`;
+    }
   }
   let hintFrame = 0;
   const hintObserver = new MutationObserver(() => {

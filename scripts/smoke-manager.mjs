@@ -39,6 +39,10 @@ export default async function ({ withPage, assert, BASE }) {
     await shot("open");
     await page.keyboard.press("Escape");
     await page.waitForSelector(".clm-lock[hidden]", { state: "attached" });
+    // The top bar's Characters button opens it too.
+    assert.match(await page.$eval("[data-tour=panel-characters]", (n) => n.title), /right-click: Character Manager/);
+    await page.click("[data-tour=panel-characters]", { button: "right" });
+    await page.waitForSelector(".clm-lock:not([hidden])");
   });
 
   await withPage("manager-tag-rows", async (page, shot) => {

@@ -7,7 +7,7 @@ A Marinara Engine External Extension with two parts:
 
 ## Character Manager
 
-Open it by **right-clicking Marinara's Open Library button** in the Characters panel (a left click still opens Marinara's library), or with the grid button next to the tag filter button in the full library. Esc or the × closes it, and your search, filters and selection are still there when you reopen it.
+Open it by **right-clicking the Characters button in the top bar** or **the Open Library button** in the Characters panel (left clicks keep Marinara's behavior), or with the grid button next to the tag filter button in the full library. Esc or the × closes it, and your search, filters and selection are still there when you reopen it.
 
 **Searching**
 
