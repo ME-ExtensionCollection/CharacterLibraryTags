@@ -318,4 +318,65 @@ export default async function ({ withPage, assert, BASE }) {
     await page.selectOption(".clm-presets", "delete:0");
     await page.waitForFunction(() => ![...document.querySelectorAll(".clm-presets option")].some((o) => o.textContent === "Female elves"));
   });
+
+  const folderMembers = async (id) => {
+    const row = await (await fetch(`${BASE}/api/characters/groups/${id}`)).json();
+    return JSON.parse(row.characterIds);
+  };
+
+  await withPage("manager-folders", async (page) => {
+    page.on("dialog", (dialog) => dialog.accept("Smoke folder"));
+    await openManager(page);
+    // Filter by folder; ids of deleted characters do not count.
+    await page.selectOption(".clm-folder-filter", "folder-fantasy");
+    const members = (await folderMembers("folder-fantasy")).filter((id) => index.byId.has(id));
+    await waitCount(page, members.length);
+    await page.selectOption(".clm-folder-filter", "none");
+    const inSome = new Set([...(await folderMembers("folder-fantasy")), ...(await folderMembers("folder-favs"))]);
+    await waitCount(page, index.cards.filter((c) => !inSome.has(c.id)).length);
+    await page.selectOption(".clm-folder-filter", "");
+    await page.fill(".clm-search", "folder:weekend");
+    await waitCount(page, (await folderMembers("folder-favs")).length);
+    await page.click(".clm-clear");
+    await waitCount(page, 3005);
+
+    // Multi-select: click, Ctrl-click, Shift-click range.
+    await page.click('.clm-card[data-index="0"]');
+    await page.click('.clm-card[data-index="2"]', { modifiers: ["Control"] });
+    await page.click('.clm-card[data-index="5"]', { modifiers: ["Shift"] });
+    assert.match(await page.textContent(".clm-selbar-count"), /^5 selected/);
+    const picked = await page.$$eval(".clm-card--checked", (n) => n.map((x) => x.dataset.id));
+    assert.equal(picked.length, 5);
+
+    // Add the selection to a folder, then undo.
+    const before = await folderMembers("folder-empty");
+    assert.deepEqual(before, []);
+    await page.selectOption(".clm-selbar .clm-folder-picker >> nth=0", "folder-empty");
+    await page.waitForSelector(".clm-toast:has-text('Empty folder')");
+    assert.deepEqual((await folderMembers("folder-empty")).sort(), [...picked].sort());
+    await page.waitForFunction(() => document.querySelector(".clm-folder-filter").textContent.includes("Empty folder (5)"));
+    await page.click(".clm-toast:has-text('Empty folder') .clm-toast-action");
+    await page.waitForFunction(() => document.querySelector(".clm-folder-filter").textContent.includes("Empty folder (0)"));
+    assert.deepEqual(await folderMembers("folder-empty"), []);
+
+    // New folder from the selection.
+    await page.selectOption(".clm-selbar .clm-folder-picker >> nth=0", "__new");
+    await page.waitForFunction(() => document.querySelector(".clm-folder-filter").textContent.includes("Smoke folder (5)"));
+
+    // Tag only the selection.
+    await page.fill(".clm-selbar .clm-bulk-tag", "Picked");
+    await page.click(".clm-selbar button:has-text('Add')");
+    await page.waitForSelector(".clm-toast:has-text('Picked')");
+    const summary = await (await fetch(`${BASE}/api/characters/catalog?view=summary`)).json();
+    assert.deepEqual(summary.items.filter((i) => i.tags.includes("Picked")).map((i) => i.id).sort(), [...picked].sort());
+
+    // Esc clears the selection; a plain click selects one character again.
+    await page.click('.clm-card[data-index="1"]');
+    assert.equal(await page.isHidden(".clm-selbar"), true);
+    // Details pane: folder chip × removes it from the folder.
+    await page.click('.clm-card[data-index="0"]');
+    await page.waitForSelector(".clm-details-folders .clm-chip--folder:has-text('Smoke folder')");
+    await page.click(".clm-details-folders .clm-chip--folder:has-text('Smoke folder') .clm-chip-remove");
+    await page.waitForFunction(() => document.querySelector(".clm-folder-filter").textContent.includes("Smoke folder (4)"));
+  });
 }

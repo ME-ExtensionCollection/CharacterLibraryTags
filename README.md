@@ -15,6 +15,7 @@ Open it by **right-clicking the Characters button in the top bar** or **the Open
 - **Tag rows**: *Mandatory tags* (must have all), *At least one tag* (must have one of them) and *Excluded tags* (must have none). They combine with each other and with the search box. Suggestions show how many characters in the current results have each tag, out of the whole library.
 - **Tag syntax in the search box**: `#tag` or `tag:"two words"` is mandatory, `-#tag` is excluded, `~tag` (or `any:tag`) is at least one, and `creator:name` filters by creator. A finished tag token turns into a chip in the matching row. Typing `#` shows tag suggestions.
 - **More filters** (sliders button): tag count range, token range, date added range, untagged only, and favorites (star button).
+- **Folders**: the folder menu in the toolbar shows one of Marinara's folders, characters in no folder, or characters in any folder. `folder:name` and `-folder:name` work in the search box. Cards in a folder show a folder icon (hover for the names).
 - **Saved searches**: the menu next to the search box saves the current search, tag rows, filters and sort under a name, loads it again, or deletes it. They are kept in the extension's storage.
 - **Tag cloud** (# button): the most common tags in the current results. Click a tag to require it, Shift-click to add it to *At least one*, and Alt-click or right-click to exclude it. The same works on tags in the details pane.
 - **Tag Merger**: with Tag Merger 0.1.1 or later running, *Canonical tags only* limits suggestions, the cloud and the details pane to canonical tags. *Match variant spellings* matches through Tag Merger's dictionary, so `Elf` also finds `elves` and anything that implies Elf.
@@ -31,6 +32,8 @@ Open it by **right-clicking the Characters button in the top bar** or **the Open
 - **Edit** (or double-click or Enter) opens Marinara's full-screen character editor. **Chat** opens Marinara's start-chat dialog. A notice then offers to go back to the manager.
 - **Favorite** toggles the favorite flag.
 - Add a tag with the *+ tag* field and remove one with its ×. Both offer Undo.
+- **Selecting several characters**: Ctrl-click (Cmd on Mac) or the checkbox on a card adds it to the selection, Shift-click selects a range, and Ctrl+A in the grid selects every result. A bar then lets you add or remove a tag on just the selection, add it to a folder, take it out of one, or make a new folder from it. Esc clears the selection.
+- **Folders in the details pane**: the character's folders are listed under its tags. Click one to show that folder, use × to take the character out, or *+ folder* to add it to one.
 - **All results** (under More filters) adds or removes one tag on every character in the current results, after a confirmation. Marinara saves a version of each card before its tags change.
 
 ## Tag filters in the full library
@@ -66,6 +69,7 @@ Type in either field to get tag suggestions with character counts. Add a tag by 
 - Each time the manager opens, `catalogGeneration` is checked and the library is reloaded only if it changed. The refresh button forces a check.
 - *All card text* sends one `catalog?view=summary&search=…` request per word and intersects the results with the local filters.
 - Tag edits use `POST /api/characters/bulk-tags` and favorites use `PATCH /api/characters/:id`, the same endpoints Marinara uses.
+- Folders come from `GET /api/characters/groups/list` each time the manager opens, because folder changes don't change `catalogGeneration`. Adding or removing characters reads the folder first and then sends its full member list with `PATCH /api/characters/groups/:id`, since that call replaces the list.
 - Edit and Chat call Marinara's own UI actions (`openCharacterDetail` and `openModal("start-character-chat")`). Marinara does not publish these to page code, so the extension finds its UI store in React's component tree, where zustand keeps a reference to it. Marinara's query client is found the same way and refreshes Marinara's character lists after an edit. If neither can be found, the extension opens the stock library, searches for the character, and clicks its Edit or Chat now button.
 
 ## Install

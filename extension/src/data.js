@@ -10,6 +10,10 @@
 //   POST /api/characters/bulk-tags                      { ids, add, remove, rename }
 //   PATCH /api/characters/:id                           { data: { extensions: { fav } } }
 //                                                       (extensions are merged server side)
+//   GET  /api/characters/groups/list                    folders; characterIds is a JSON string
+//   GET  /api/characters/groups/:id                     one folder (read before changing it)
+//   POST /api/characters/groups                         { name, characterIds }
+//   PATCH /api/characters/groups/:id                    { characterIds } replaces the member list
 
 const CLMData = (() => {
   "use strict";
@@ -19,6 +23,7 @@ const CLMData = (() => {
   const BULK_CHUNK = 5000;
 
   let items = [];
+  let folders = []; // [{ id, name, description, avatarPath, characterIds: string[] }]
   let generation = null;
   let loaded = false;
   let loading = null;
@@ -194,6 +199,74 @@ const CLMData = (() => {
     return result;
   }
 
+  // ── Folders (Marinara's character groups) ──
+
+  function parseFolder(row) {
+    let ids = row?.characterIds;
+    if (typeof ids === "string") {
+      try {
+        ids = JSON.parse(ids);
+      } catch {
+        ids = [];
+      }
+    }
+    return {
+      id: row.id,
+      name: typeof row.name === "string" && row.name.trim() ? row.name : "Untitled folder",
+      description: typeof row.description === "string" ? row.description : "",
+      avatarPath: row.avatarPath ?? null,
+      characterIds: Array.isArray(ids) ? [...new Set(ids.filter((id) => typeof id === "string"))] : [],
+    };
+  }
+
+  /** Folder writes do not change catalogGeneration, so folders reload on every open. */
+  async function loadFolders() {
+    const rows = await request("/api/characters/groups/list");
+    folders = Array.isArray(rows) ? rows.filter((row) => row && typeof row.id === "string").map(parseFolder) : [];
+    emit();
+    return folders;
+  }
+
+  /**
+   * Add or remove characters in one folder. Reads the folder first, because
+   * PATCH replaces the whole member list.
+   */
+  async function editFolder(folderId, { add = [], remove = [] }) {
+    const current = parseFolder(await request(`/api/characters/groups/${encodeURIComponent(folderId)}`));
+    const removeSet = new Set(remove);
+    const next = current.characterIds.filter((id) => !removeSet.has(id));
+    for (const id of add) if (!next.includes(id)) next.push(id);
+    const changed = next.length !== current.characterIds.length || next.some((id, i) => id !== current.characterIds[i]);
+    if (changed) {
+      const row = await request(`/api/characters/groups/${encodeURIComponent(folderId)}`, {
+        method: "PATCH",
+        headers: WRITE_HEADERS,
+        body: JSON.stringify({ characterIds: next }),
+      });
+      replaceFolder(row ? parseFolder(row) : { ...current, characterIds: next });
+      afterWrite();
+      emit();
+    }
+    return { before: current.characterIds, after: next, changed };
+  }
+
+  async function createFolder(name, characterIds = []) {
+    const row = await request("/api/characters/groups", {
+      method: "POST",
+      headers: WRITE_HEADERS,
+      body: JSON.stringify({ name, description: "", characterIds: [...new Set(characterIds)] }),
+    });
+    const folder = parseFolder(row);
+    folders = [...folders.filter((f) => f.id !== folder.id), folder];
+    afterWrite();
+    emit();
+    return folder;
+  }
+
+  function replaceFolder(folder) {
+    folders = folders.some((f) => f.id === folder.id) ? folders.map((f) => (f.id === folder.id ? folder : f)) : [...folders, folder];
+  }
+
   async function setFavorite(id, favorite) {
     await request(`/api/characters/${encodeURIComponent(id)}`, {
       method: "PATCH",
@@ -266,6 +339,9 @@ const CLMData = (() => {
     revalidate,
     searchAllTerms,
     getCharacter,
+    loadFolders,
+    editFolder,
+    createFolder,
     editTags,
     setFavorite,
     tagMerger,
@@ -281,6 +357,9 @@ const CLMData = (() => {
     },
     get items() {
       return items;
+    },
+    get folders() {
+      return folders;
     },
     get loaded() {
       return loaded;

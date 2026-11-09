@@ -52,6 +52,8 @@ const CLMManager = (() => {
     ],
     chevron: [["path", { d: "m6 9 6 6 6-6" }]],
     plus: [["path", { d: "M5 12h14M12 5v14" }]],
+    folder: [["path", { d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" }]],
+    check: [["path", { d: "M20 6 9 17l-5-5" }]],
   };
 
   function icon(name, className = "clm-icon") {
@@ -127,6 +129,9 @@ const CLMManager = (() => {
     serverIds: null,
     serverError: "",
     selectedId: null,
+    multi: new Set(), // ids picked with Ctrl/Shift-click or the card checkboxes
+    anchorId: null, // last plain or Ctrl click, for Shift-click ranges
+    indexedFolders: null,
     loadError: "",
     loading: false,
     detailsDirty: false,
@@ -561,6 +566,15 @@ const CLMManager = (() => {
       update();
     });
     const count = h("span.clm-count", { attrs: { "aria-live": "polite" } });
+    const folderSelect = h("select.clm-select.clm-folder-filter", {
+      attrs: { title: "Folder", "aria-label": "Folder" },
+      on: {
+        change: (e) => {
+          S.query.folder = e.target.value || null;
+          update({ resetScroll: true });
+        },
+      },
+    });
     const presetSelect = h("select.clm-select.clm-presets", {
       attrs: { title: "Saved searches", "aria-label": "Saved searches" },
       on: { change: (e) => onPresetChoice(e.target) },
@@ -604,6 +618,7 @@ const CLMManager = (() => {
       h(
         "div.clm-toolbar-group",
         {},
+        folderSelect,
         favButton,
         iconButton("dice", "Random character", pickRandom),
         iconButton("refresh", "Reload the library", () => void refresh(true)),
@@ -697,6 +712,7 @@ const CLMManager = (() => {
     const gridWrap = h("div.clm-grid-wrap", {}, viewport, empty);
     const details = h("section.clm-details", { attrs: { hidden: true, "aria-label": "Character details" } });
     const body = h("div.clm-body", {}, cloud, gridWrap, details);
+    const selectionBar = buildSelectionBar();
 
     const popup = h(
       "div.clm-popup",
@@ -704,6 +720,7 @@ const CLMManager = (() => {
       toolbar,
       tagRows,
       advanced,
+      selectionBar.node,
       body,
     );
     const lock = h("div.clm-lock", { attrs: { hidden: true } }, popup);
@@ -725,6 +742,7 @@ const CLMManager = (() => {
       scopeSelect,
       searchInput,
       presetSelect,
+      folderSelect,
       favButton,
       count,
       clearButton,
@@ -741,6 +759,7 @@ const CLMManager = (() => {
       viewport,
       empty,
       details,
+      selectionBar,
     });
 
     ui.grid = CLMVirtualGrid.create(viewport, {
@@ -797,7 +816,9 @@ const CLMManager = (() => {
     const star = h("span.clm-card-fav", { attrs: { title: "Favorite" } }, icon("star"));
     const name = h("div.clm-card-name");
     const meta = h("div.clm-card-meta");
-    node.append(media, star, name, meta);
+    const check = h("button.clm-card-check", { attrs: { type: "button", tabindex: "-1", "aria-label": "Select" } }, icon("check"));
+    const folder = h("span.clm-card-folder", {}, icon("folder"));
+    node.append(media, star, name, meta, check, folder);
     return node;
   }
 
@@ -818,13 +839,64 @@ const CLMManager = (() => {
     if (node.children[3].textContent !== meta) node.children[3].textContent = meta;
     node.title = card.creator ? `${card.name}\nby ${card.creator}` : card.name;
     node.classList.toggle("clm-card--selected", card.id === S.selectedId);
+    node.classList.toggle("clm-card--checked", S.multi.has(card.id));
+    const folders = card.folderIds.map((id) => S.index.folderById.get(id)?.name).filter(Boolean);
+    node.classList.toggle("clm-card--in-folder", folders.length > 0);
+    if (folders.length) node.children[5].title = `In ${folders.join(", ")}`;
     node.classList.toggle("clm-card--fav", card.favorite);
     node.setAttribute("aria-selected", String(card.id === S.selectedId));
   }
 
+  /** Click: show one character. Ctrl/Cmd-click or the checkbox: add to the selection. Shift-click: select a range. */
   function onGridClick(event) {
     const node = event.target.closest(".clm-card");
-    if (node) select(node.dataset.id);
+    if (!node) return;
+    const id = node.dataset.id;
+    if (event.shiftKey) {
+      event.preventDefault();
+      selectRange(S.anchorId ?? S.selectedId ?? id, id);
+    } else if (event.ctrlKey || event.metaKey || event.target.closest(".clm-card-check")) {
+      if (!S.multi.size && S.selectedId && S.selectedId !== id) S.multi.add(S.selectedId);
+      toggleMulti(id);
+      S.anchorId = id;
+    } else {
+      if (S.multi.size) clearMulti();
+      S.anchorId = id;
+      select(id);
+    }
+  }
+
+  function toggleMulti(id) {
+    if (S.multi.has(id)) S.multi.delete(id);
+    else S.multi.add(id);
+    renderSelection();
+  }
+
+  function selectRange(fromId, toId) {
+    const a = S.results.findIndex((c) => c.id === fromId);
+    const b = S.results.findIndex((c) => c.id === toId);
+    if (a < 0 || b < 0) return toggleMulti(toId);
+    for (let i = Math.min(a, b); i <= Math.max(a, b); i += 1) S.multi.add(S.results[i].id);
+    renderSelection();
+  }
+
+  function clearMulti() {
+    S.multi.clear();
+    renderSelection();
+  }
+
+  /** Selected characters that still exist, in the current sort order where shown. */
+  function selectedCards() {
+    const shown = S.results.filter((c) => S.multi.has(c.id));
+    const shownIds = new Set(shown.map((c) => c.id));
+    const hidden = [...S.multi].filter((id) => !shownIds.has(id)).map((id) => S.index.byId.get(id)).filter(Boolean);
+    return [...shown, ...hidden];
+  }
+
+  function renderSelection() {
+    ui.popup.classList.toggle("clm-has-multi", S.multi.size > 0);
+    ui.grid.refresh();
+    ui.selectionBar.render();
   }
 
   function onGridDoubleClick(event) {
@@ -851,6 +923,10 @@ const CLMManager = (() => {
       event.preventDefault();
       const next = S.selectedId === null ? 0 : Math.min(S.results.length - 1, Math.max(0, at + moves[event.key]));
       select(S.results[next].id, { scroll: true });
+    } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+      event.preventDefault();
+      for (const card of S.results) S.multi.add(card.id);
+      renderSelection();
     } else if (event.key === "Enter" && S.selectedId) {
       event.preventDefault();
       void CLMBridge.edit(S.index.byId.get(S.selectedId)?.item);
@@ -868,6 +944,99 @@ const CLMManager = (() => {
     if (!S.results.length) return;
     const card = S.results[Math.floor(Math.random() * S.results.length)];
     select(card.id, { scroll: true });
+  }
+
+  // ── Folders ──
+
+  function renderFolderSelect() {
+    const select = ui.folderSelect;
+    const folders = S.index.folders;
+    const unfiled = S.index.cards.reduce((n, c) => n + (c.folderIds.length ? 0 : 1), 0);
+    const options = [
+      ["", "All folders"],
+      ["none", `In no folder (${unfiled.toLocaleString()})`],
+      ["some", `In a folder (${(S.index.cards.length - unfiled).toLocaleString()})`],
+      ...folders.map((f) => [f.id, `${f.name} (${f.count.toLocaleString()})`]),
+    ];
+    const signature = options.map(([v, t]) => `${v}=${t}`).join("|");
+    if (select.dataset.signature !== signature) {
+      select.replaceChildren(...options.map(([value, text]) => h("option", { text, value })));
+      select.dataset.signature = signature;
+    }
+    select.value = S.query.folder ?? "";
+    select.classList.toggle("clm-on", !!S.query.folder);
+    select.hidden = folders.length === 0 && !S.query.folder;
+  }
+
+  function folderChip(id, card) {
+    const folder = S.index.folderById.get(id);
+    if (!folder) return null;
+    const chip = h(
+      `span.clm-chip.clm-chip--tag.clm-chip--folder${S.query.folder === id ? ".clm-chip--mandatory" : ""}`,
+      {
+        attrs: { title: "Show this folder", tabindex: "0", role: "button" },
+        on: {
+          click: () => {
+            S.query.folder = S.query.folder === id ? null : id;
+            update({ resetScroll: true });
+          },
+        },
+      },
+      h("span.clm-chip-label", { text: folder.name }),
+    );
+    chip.append(CLMEdit.removeFromFolderButton(folder, [card]));
+    return chip;
+  }
+
+  /** Bar shown while characters are selected: tag them or file them in folders. */
+  function buildSelectionBar() {
+    const label = h("span.clm-selbar-count");
+    const tagInput = h("input.clm-input.clm-bulk-tag", {
+      attrs: { type: "text", placeholder: "tag", list: "clm-all-tags", autocomplete: "off", "aria-label": "Tag for the selected characters" },
+    });
+    const runTag = (mode) => {
+      const typed = tagInput.value.trim();
+      if (!typed) return tagInput.focus();
+      void CLMEdit.bulkTag(selectedCards(), mode, S.index.tags.get(CLM.normalizeTag(typed))?.label ?? typed);
+    };
+    const folderSlot = h("span.clm-selbar-folders");
+    const node = h(
+      "div.clm-selbar",
+      { attrs: { hidden: true, role: "toolbar", "aria-label": "Selected characters" } },
+      label,
+      h("button.clm-btn", { text: "Select all results", attrs: { type: "button", title: "Ctrl+A in the grid" }, on: { click: () => (S.results.forEach((c) => S.multi.add(c.id)), renderSelection()) } }),
+      h("button.clm-btn", { text: "Clear", attrs: { type: "button", title: "Esc" }, on: { click: clearMulti } }),
+      h("span.clm-selbar-sep"),
+      h("span.clm-label", { text: "Tag:" }),
+      tagInput,
+      h("button.clm-btn", { text: "Add", attrs: { type: "button" }, on: { click: () => runTag("add") } }),
+      h("button.clm-btn", { text: "Remove", attrs: { type: "button" }, on: { click: () => runTag("remove") } }),
+      h("span.clm-selbar-sep"),
+      folderSlot,
+    );
+    let lastSignature = "";
+    return {
+      node,
+      render() {
+        const cards = selectedCards();
+        node.hidden = cards.length === 0;
+        if (!cards.length) {
+          lastSignature = "";
+          return;
+        }
+        const shown = cards.filter((c) => S.results.includes(c)).length;
+        label.textContent = `${plural(cards.length, "selected", "selected")}${shown < cards.length ? ` (${cards.length - shown} hidden by filters)` : ""}`;
+        // Rebuild the folder controls only when the selection or folders change.
+        const signature = `${cards.map((c) => c.id).join(",")}|${S.indexedFolders?.length}|${S.index.folders.map((f) => f.count).join(",")}`;
+        if (signature !== lastSignature) {
+          lastSignature = signature;
+          folderSlot.replaceChildren(
+            CLMEdit.folderPicker(cards, { label: "Add to folder…" }),
+            CLMEdit.folderPicker(cards, { label: "Remove from folder…", mode: "remove" }),
+          );
+        }
+      },
+    };
   }
 
   // ── Details pane ──
@@ -956,6 +1125,16 @@ const CLMManager = (() => {
       CLMEdit.addTagField(card),
     );
 
+    const folderRow = h(
+      "div.clm-details-folders",
+      {},
+      icon("folder", "clm-icon clm-muted"),
+      card.folderIds.length
+        ? card.folderIds.map((id) => folderChip(id, card))
+        : h("span.clm-muted", { text: "No folder" }),
+      CLMEdit.folderPicker([card], { label: "+ folder" }),
+    );
+
     const actions = h(
       "div.clm-details-actions",
       {},
@@ -987,6 +1166,7 @@ const CLMManager = (() => {
           ),
           actions,
           tags,
+          folderRow,
         ),
         iconButton("x", "Close details", () => select(null), "clm-details-close"),
       ),
@@ -1038,8 +1218,10 @@ const CLMManager = (() => {
 
   function rebuildIndex() {
     const expand = S.foldVariants ? S.expand : null;
-    S.index = CLM.buildIndex(CLMData.items, { expand });
+    S.index = CLM.buildIndex(CLMData.items, { expand, folders: CLMData.folders });
     S.indexedItems = CLMData.items;
+    S.indexedFolders = CLMData.folders;
+    if (S.query.folder && !["none", "some"].includes(S.query.folder) && !S.index.folderById.has(S.query.folder)) S.query.folder = null;
   }
 
   function scheduleServerSearch() {
@@ -1067,7 +1249,7 @@ const CLMManager = (() => {
   let lastScrollKey = "";
 
   function compute() {
-    if (S.indexedItems !== CLMData.items) rebuildIndex();
+    if (S.indexedItems !== CLMData.items || S.indexedFolders !== CLMData.folders) rebuildIndex();
     scheduleServerSearch();
     const filtered = CLM.filter(S.index, S.query, { serverIds: S.serverIds });
     S.results = CLM.sortCards(filtered, S.sort, S.seed);
@@ -1115,6 +1297,10 @@ const CLMManager = (() => {
     ui.count.textContent = status;
     ui.count.title = S.serverError || S.loadError || "";
     ui.clearButton.hidden = active === 0;
+    renderFolderSelect();
+    for (const id of S.multi) if (!S.index.byId.has(id)) S.multi.delete(id);
+    ui.popup.classList.toggle("clm-has-multi", S.multi.size > 0);
+    ui.selectionBar.render();
 
     // Rows
     ui.tagRows.hidden = !S.showTagRows;
@@ -1207,6 +1393,12 @@ const CLMManager = (() => {
     try {
       if (force || CLMData.loaded) await CLMData.revalidate();
       else await CLMData.load();
+      // Folder edits do not change the catalog generation, so read them every time.
+      try {
+        await CLMData.loadFolders();
+      } catch (error) {
+        marinara.log.warn("Character Manager could not load folders", error);
+      }
       if (S.foldVariants && CLMData.tagMerger().available) S.expand = await CLMData.tagExpansion(CLM.normalizeTag);
       rebuildIndex();
     } catch (error) {
@@ -1251,7 +1443,8 @@ const CLMManager = (() => {
     event.stopPropagation();
     if (event.key === "Escape" && !event.defaultPrevented) {
       event.preventDefault();
-      if (S.selectedId && document.activeElement === ui.viewport) select(null);
+      if (S.multi.size && !/^(INPUT|TEXTAREA|SELECT)$/u.test(document.activeElement?.tagName ?? "")) clearMulti();
+      else if (S.selectedId && document.activeElement === ui.viewport) select(null);
       else close();
       return;
     }
@@ -1290,6 +1483,7 @@ const CLMManager = (() => {
     update,
     select,
     renderDetails,
+    clearSelection: clearMulti,
     get isOpen() {
       return S.open;
     },

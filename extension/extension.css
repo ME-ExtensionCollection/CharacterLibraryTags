@@ -355,8 +355,14 @@
 }
 
 .clm-grow {
-  flex: 1 1 22rem;
+  flex: 1 1 30rem;
   min-width: 0;
+}
+
+@media (max-width: 48rem) {
+  .clm-search-wrap {
+    min-width: 0;
+  }
 }
 
 .clm-toolbar-end {
@@ -374,7 +380,7 @@
   display: flex;
   flex: 1;
   align-items: center;
-  min-width: 0;
+  min-width: 14rem;
 }
 
 .clm-search-icon {
@@ -390,7 +396,7 @@
 }
 
 .clm-presets {
-  max-width: 11rem;
+  max-width: 9rem;
 }
 
 .clm-width {
@@ -713,6 +719,7 @@
   cursor: pointer;
   transition: border-color 0.12s, box-shadow 0.12s;
   contain: layout style paint;
+  user-select: none;
 }
 
 .clm-card:hover {
@@ -971,6 +978,110 @@
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Folders and multi-select */
+
+.clm-folder-filter {
+  max-width: 11rem;
+}
+
+.clm-folder-picker {
+  min-height: 1.6rem;
+  max-width: 14rem;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.78rem;
+}
+
+.clm-details-folders {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.clm-chip--folder {
+  border-style: dashed;
+}
+
+.clm-selbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--clm-accent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--clm-accent) 12%, var(--clm-panel));
+}
+
+.clm-selbar-count {
+  font-weight: 600;
+}
+
+.clm-selbar-sep {
+  width: 1px;
+  height: 1.4rem;
+  background: var(--clm-border);
+}
+
+.clm-selbar-folders {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.clm-card-check {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  display: grid;
+  place-items: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 0.6);
+  border-radius: 0.35rem;
+  background: rgb(0 0 0 / 0.45);
+  color: transparent;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.clm-card-check .clm-icon {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.clm-card:hover .clm-card-check,
+.clm-has-multi .clm-card-check,
+.clm-card--checked .clm-card-check {
+  opacity: 1;
+}
+
+.clm-card--checked .clm-card-check {
+  border-color: var(--clm-accent);
+  background: var(--clm-accent);
+  color: var(--background, #050312);
+}
+
+.clm-card--checked {
+  outline: 2px solid var(--clm-accent);
+  outline-offset: -2px;
+}
+
+.clm-card-folder {
+  position: absolute;
+  bottom: 2.7rem;
+  right: 0.5rem;
+  display: none;
+  color: var(--foreground, #ddd);
+  filter: drop-shadow(0 0 2px rgb(0 0 0 / 0.9));
+}
+
+.clm-card--in-folder .clm-card-folder {
+  display: block;
 }
 
 /* Toasts */

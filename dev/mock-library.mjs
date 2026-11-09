@@ -205,8 +205,20 @@ function sortRows(rows, sort) {
 const foldTag = (tag) => tag.trim().toLowerCase();
 
 /** In-memory mock of Marinara's /api/characters routes used by the extension. */
+function buildFolders(rows) {
+  const at = "2026-10-01T00:00:00.000Z";
+  const pick = (start, step, n) => rows.filter((_, i) => i % step === start).slice(0, n).map((r) => r.id);
+  return [
+    { id: "folder-favs", name: "Weekend picks", description: "", avatarPath: null, characterIds: pick(3, 41, 40), createdAt: at, updatedAt: at },
+    { id: "folder-fantasy", name: "Fantasy crew", description: "", avatarPath: null, characterIds: [...pick(5, 17, 120), "special-0", "deleted-character"], createdAt: at, updatedAt: at },
+    { id: "folder-empty", name: "Empty folder", description: "", avatarPath: null, characterIds: [], createdAt: at, updatedAt: at },
+  ];
+}
+
 export function createMockApi(options) {
   let rows = buildLibrary(options);
+  let folders = buildFolders(rows);
+  const folderRow = (f) => ({ ...f, characterIds: JSON.stringify(f.characterIds) });
   let generation = 1;
   const stats = { requests: [] };
   const bump = () => {
@@ -314,6 +326,26 @@ export function createMockApi(options) {
       return [200, [...new Set(rows.flatMap((r) => r.data.tags))].sort((a, b) => a.localeCompare(b))];
     }
     if (method === "POST" && path === "/api/characters/bulk-tags") return bulkTags(body);
+    if (method === "GET" && path === "/api/characters/groups/list") return [200, folders.map(folderRow)];
+    if (method === "POST" && path === "/api/characters/groups") {
+      if (typeof body?.name !== "string" || !body.name.trim()) return [400, { error: "Name required" }];
+      const now = new Date().toISOString();
+      const folder = { id: `folder-${Date.now().toString(36)}-${folders.length}`, name: body.name, description: body.description ?? "", avatarPath: null, characterIds: body.characterIds ?? [], createdAt: now, updatedAt: now };
+      folders.push(folder);
+      return [200, folderRow(folder)];
+    }
+    const group = path.match(/^\/api\/characters\/groups\/([^/]+)$/);
+    if (group) {
+      const folder = folders.find((f) => f.id === decodeURIComponent(group[1]));
+      if (!folder) return [404, { error: "Group not found" }];
+      if (method === "GET") return [200, folderRow(folder)];
+      if (method === "PATCH") {
+        if (Array.isArray(body?.characterIds)) folder.characterIds = body.characterIds;
+        if (typeof body?.name === "string") folder.name = body.name;
+        folder.updatedAt = new Date().toISOString();
+        return [200, folderRow(folder)];
+      }
+    }
     const match = path.match(/^\/api\/characters\/([^/]+)$/);
     if (match) {
       const id = decodeURIComponent(match[1]);
@@ -336,8 +368,12 @@ export function createMockApi(options) {
     get rows() {
       return rows;
     },
+    get folders() {
+      return folders;
+    },
     reset(next = options) {
       rows = buildLibrary(next);
+      folders = buildFolders(rows);
       bump();
     },
   };
