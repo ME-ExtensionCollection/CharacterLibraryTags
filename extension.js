@@ -4,10 +4,13 @@
 // full Character Library that expands "Mandatory tags", "At least one tag" and
 // "Excluded tags" fields with autocomplete.
 //
-// - Mandatory (all-of) and included (any-of) tags hide non-matching cards
-//   through an injected stylesheet, so React-owned nodes are never modified.
-// - Excluded tags live in the library search box as `-tag:"X"` tokens, which
-//   Marinara already understands. The search box is the source of truth.
+// - Mandatory (all-of) tags live in the library search box as `"X"` terms.
+//   Marinara reads every positive search term as a required tag and filters
+//   on the server, so they cover pages that are not loaded yet.
+// - Excluded tags live in the search box as `-tag:"X"` tokens, Marinara's own
+//   exclusion syntax. For both, the search box is the source of truth.
+// - Included (any-of) tags hide non-matching cards through an injected
+//   stylesheet, so React-owned nodes are never modified.
 
 const ROOT_SELECTOR = '[data-component="CharacterLibraryView"]';
 const CHARACTER_KIND_SELECTOR = ".mari-panel-gradient--characters";
@@ -17,6 +20,9 @@ const MAX_SUGGESTIONS = 10;
 const UNKNOWN_CARD_REFRESH_DELAY = 500;
 // Mirrors parseCardLibrarySearchQuery in packages/client/src/lib/card-library-search.ts.
 const EXCLUDE_TOKEN = /(?:^|\s)(?:-|!)(?:tag:|#)?(?:"([^"]+)"|(\S+))/gi;
+// Matches an exclusion token (no group) or a quoted positive term (group 1), so
+// `-tag:"X"` is never read as a mandatory tag.
+const SEARCH_TOKEN = /(?:^|\s)(?:(?:-|!)(?:tag:|#)?(?:"[^"]+"|\S+)|"([^"]+)")/gi;
 const SVG_NS = "http://www.w3.org/2000/svg";
 const nativeValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
 
@@ -34,7 +40,6 @@ const catalog = {
 };
 
 // Reset whenever the library mounts, matching Marinara's own search box.
-const requiredTags = new Map(); // normalized tag -> label
 const includedTags = new Map(); // normalized tag -> label
 let view = null;
 let frame = 0;
@@ -95,7 +100,10 @@ async function fetchCatalog() {
     let offset = 0;
     let changed = false;
     for (;;) {
-      const response = await marinara.fetch(`/api/characters/catalog?limit=${CATALOG_PAGE_SIZE}&offset=${offset}`);
+      // `view=summary` returns every row at once; older builds ignore it and page.
+      const response = await marinara.fetch(
+        `/api/characters/catalog?view=summary&limit=${CATALOG_PAGE_SIZE}&offset=${offset}`,
+      );
       if (!response.ok) throw new Error(`Catalog request failed (${response.status})`);
       const page = await response.json();
       generation ??= page.catalogGeneration;
@@ -174,13 +182,10 @@ function scheduleCatalogRefresh() {
 
 const labelFor = (key, fallback) => catalog.tagInfo.get(key)?.label ?? fallback;
 
-// ── Mandatory (all-of) and include (any-of) ──
+// ── Include (any-of, stylesheet) ──
 
-const hasTagFilters = () => requiredTags.size > 0 || includedTags.size > 0;
-
-function matchesTagFilters(tags) {
+function matchesIncluded(tags) {
   if (!tags) return false;
-  for (const key of requiredTags.keys()) if (!tags.has(key)) return false;
   if (includedTags.size === 0) return true;
   for (const key of includedTags.keys()) if (tags.has(key)) return true;
   return false;
@@ -188,10 +193,10 @@ function matchesTagFilters(tags) {
 
 function renderTagStyle() {
   let css = "";
-  if (view && hasTagFilters()) {
+  if (view && includedTags.size > 0) {
     const selectors = [];
     for (const [id, tags] of catalog.idToTags) {
-      if (matchesTagFilters(tags)) continue;
+      if (matchesIncluded(tags)) continue;
       const card = `${ROOT_SELECTOR} [${CARD_ATTRIBUTE}="${CSS.escape(id)}"]`;
       // The sibling is the inline detail Marinara shows under a selected card on small screens.
       selectors.push(card, `${card} + .col-span-full`);
@@ -201,25 +206,37 @@ function renderTagStyle() {
   if (styleElement.textContent !== css) styleElement.textContent = css;
 }
 
-const tagSetter = (tags) => ({
+const includedTagSetter = {
   add(label) {
-    tags.set(normalizeTag(label), label);
+    includedTags.set(normalizeTag(label), label);
     renderFilters();
   },
   remove(key) {
-    tags.delete(key);
+    includedTags.delete(key);
     renderFilters();
   },
-});
+};
 
-const requiredTagSetter = tagSetter(requiredTags);
-const includedTagSetter = tagSetter(includedTags);
+// ── Search box tokens: mandatory `"X"` and excluded `-tag:"X"` ──
 
-// ── Exclude (search box `-tag:` tokens) ──
+const searchValue = () => view?.searchInput?.value ?? "";
+
+function readRequiredTags() {
+  const tags = new Map();
+  for (const match of searchValue().matchAll(SEARCH_TOKEN)) {
+    const raw = (match[1] ?? "").trim();
+    const key = normalizeTag(raw);
+    if (key && !tags.has(key)) tags.set(key, labelFor(key, raw));
+  }
+  return tags;
+}
+
+// Words left after every token is removed. Marinara reads them as more required tags.
+const searchFreeText = () => searchValue().replace(SEARCH_TOKEN, " ").trim();
 
 function readExcludedTags() {
   const tags = new Map();
-  for (const match of (view?.searchInput.value ?? "").matchAll(EXCLUDE_TOKEN)) {
+  for (const match of searchValue().matchAll(EXCLUDE_TOKEN)) {
     const raw = (match[1] ?? match[2] ?? "").trim();
     const key = normalizeTag(raw);
     if (key && !tags.has(key)) tags.set(key, labelFor(key, raw));
@@ -234,20 +251,37 @@ function writeSearch(value) {
   view.searchInput.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-const canExclude = (label) => !label.includes('"');
+const canQuote = (label) => !label.includes('"');
 
-function addExcludedTag(label) {
-  if (!canExclude(label) || readExcludedTags().has(normalizeTag(label))) return;
+function appendSearchToken(token) {
   const current = view.searchInput.value.trimEnd();
-  writeSearch(`${current ? `${current} ` : ""}-tag:"${label}"`);
+  writeSearch(`${current ? `${current} ` : ""}${token}`);
 }
 
-function removeExcludedTag(key) {
+function removeSearchTokens(pattern, keyOf, key) {
   const next = view.searchInput.value
-    .replace(EXCLUDE_TOKEN, (match, quoted, bare) => (normalizeTag((quoted ?? bare ?? "").trim()) === key ? " " : match))
+    .replace(pattern, (match, ...groups) => (normalizeTag(keyOf(groups)) === key ? " " : match))
     .replace(/\s{2,}/gu, " ")
     .trim();
   writeSearch(next);
+}
+
+function addRequiredTag(label) {
+  if (!canQuote(label) || readRequiredTags().has(normalizeTag(label))) return;
+  appendSearchToken(`"${label}"`);
+}
+
+function removeRequiredTag(key) {
+  removeSearchTokens(SEARCH_TOKEN, ([quoted]) => (quoted ?? "").trim(), key);
+}
+
+function addExcludedTag(label) {
+  if (!canQuote(label) || readExcludedTags().has(normalizeTag(label))) return;
+  appendSearchToken(`-tag:"${label}"`);
+}
+
+function removeExcludedTag(key) {
+  removeSearchTokens(EXCLUDE_TOKEN, ([quoted, bare]) => (quoted ?? bare ?? "").trim(), key);
 }
 
 // ── Tag field widget ──
@@ -445,7 +479,6 @@ function setPanelOpen(open) {
 }
 
 function mount(root, anchors) {
-  requiredTags.clear();
   includedTags.clear();
   catalog.requestedIds.clear();
 
@@ -461,10 +494,11 @@ function mount(root, anchors) {
     id: "clt-required",
     label: "Mandatory tags:",
     chipClass: "mari-chrome-control--selected clt-chip--required",
-    readTags: () => requiredTags,
-    addTag: requiredTagSetter.add,
-    removeTag: requiredTagSetter.remove,
-    canAdd: () => true,
+    readTags: readRequiredTags,
+    addTag: addRequiredTag,
+    removeTag: removeRequiredTag,
+    canAdd: canQuote,
+    disabledReason: 'Tags containing " cannot be written as search terms',
   });
   const includeField = createTagField({
     id: "clt-include",
@@ -482,8 +516,8 @@ function mount(root, anchors) {
     readTags: readExcludedTags,
     addTag: addExcludedTag,
     removeTag: removeExcludedTag,
-    canAdd: canExclude,
-    disabledReason: 'Tags containing " cannot be excluded with search syntax',
+    canAdd: canQuote,
+    disabledReason: 'Tags containing " cannot be written as search terms',
   });
   const hint = el("p", { className: "clt-hint", attrs: { "aria-live": "polite" } });
   const panel = el("div", { className: "clt-panel", attrs: { id: "clt-panel" } });
@@ -530,7 +564,6 @@ function unmount() {
   view.toggle.remove();
   view.panel.remove();
   view = null;
-  requiredTags.clear();
   includedTags.clear();
   renderTagStyle();
 }
@@ -547,20 +580,27 @@ function renderHint() {
     }
   }
 
+  const required = [...readRequiredTags().keys()];
   let text = "";
-  if (hasTagFilters()) {
+  if (required.length > 0 || includedTags.size > 0) {
     if (!catalog.loaded) {
       text = "Loading tags…";
     } else {
       const excluded = [...readExcludedTags().keys()];
+      const matches = (tags) =>
+        !!tags &&
+        required.every((key) => tags.has(key)) &&
+        matchesIncluded(tags) &&
+        !excluded.some((key) => tags.has(key));
       let visible = 0;
-      for (const id of ids) if (matchesTagFilters(catalog.idToTags.get(id))) visible += 1;
+      for (const id of ids) if (matches(catalog.idToTags.get(id))) visible += 1;
       let total = 0;
-      for (const tags of catalog.idToTags.values()) {
-        if (matchesTagFilters(tags) && !excluded.some((key) => tags.has(key))) total += 1;
-      }
+      for (const tags of catalog.idToTags.values()) if (matches(tags)) total += 1;
       text = `Showing ${visible} of ${total} characters with these tags.`;
-      if (visible < total) text += " Use Load more, or clear the search text, to see the rest.";
+      if (visible < total) text += " Scroll down or use Load more to see the rest.";
+    }
+    if (required.length > 0 && searchFreeText()) {
+      text += " Other words in the search box are also treated as required tags.";
     }
   }
   if (view.hint.textContent !== text) view.hint.textContent = text;
@@ -571,7 +611,7 @@ function renderFilters() {
   if (!view) return;
   for (const field of view.fields) field.render();
   renderTagStyle();
-  const active = requiredTags.size + includedTags.size + readExcludedTags().size;
+  const active = readRequiredTags().size + includedTags.size + readExcludedTags().size;
   const badgeText = active ? String(active) : "";
   if (view.badge.textContent !== badgeText) view.badge.textContent = badgeText;
   view.badge.hidden = !active;
