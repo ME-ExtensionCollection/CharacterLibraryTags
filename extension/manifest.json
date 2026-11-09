@@ -3,11 +3,11 @@
   "version": 1,
   "config": {
     "name": "Character Library Tag Filter",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "description": "Adds mandatory (all-of), include (any-of) and exclude tag filters with autocomplete to the full Character Library.",
     "runtime": "client",
     "capabilities": ["full_page_access"],
-    "jsPath": "extension.js",
+    "jsPath": ["src/filter-panel.js"],
     "cssPath": "extension.css"
   }
 }

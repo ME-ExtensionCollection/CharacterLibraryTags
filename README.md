@@ -29,11 +29,11 @@ Type in either field to get tag suggestions with character counts. Add a tag by 
 
 ## Install
 
-The extension needs **Full page access**, because the sandboxed runtime can't reach the library's DOM. Full page code runs inside Marinara's page with the same authority as code pasted into the browser console, so read `extension.js` before you approve it.
+The extension needs **Full page access**, because the sandboxed runtime can't reach the library's DOM. Full page code runs inside Marinara's page with the same authority as code pasted into the browser console, so read the files in `extension/` before you approve them.
 
 1. Set `ENABLE_EXTERNAL_EXTENSIONS=true` in the Marinara host's `.env` and restart Marinara.
 2. Open **Settings** > **Advanced** > **Danger Zone** and enable **Allow third-party extension imports**.
-3. Open **Settings** > **Addons** > **External Extensions** and choose **Import Extension Folder**. Select this folder.
+3. Open **Settings** > **Addons** > **External Extensions** and choose **Import Extension Folder**. Select the **`extension`** folder in this repository, not the repository root.
 4. Open the draft, check the code, choose **Review and Run**, and approve the hash.
 
 Every code change disables the extension until you review and approve the new hash.
@@ -44,3 +44,7 @@ Every code change disables the extension until you review and approve the new ha
 - **At least one tag** can only hide cards that are already loaded. Marinara loads the next page on its own while the list is short, and the panel shows how many matching characters exist in total.
 - Marinara's own "visible / loaded" count in the library header ignores the **At least one tag** filter.
 - Tags that contain `"` can't be made mandatory or excluded, because the search syntax can't quote them.
+
+## Development
+
+`node scripts/serve.mjs` serves a dev harness on http://localhost:5179 with a mock Marinara API and a generated mock library (`dev/mock-library.mjs`), so nothing touches a real Marinara install. `npm test` runs the unit tests, `npm run check` also compiles the extension the way Marinara wraps it, and `npm run smoke` drives the harness in headless Chrome (see the header of `scripts/smoke.mjs`).
