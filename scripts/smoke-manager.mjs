@@ -198,4 +198,53 @@ export default async function ({ withPage, assert, BASE }) {
     await openManager(page);
     assert.equal(await page.isDisabled(".clm-tagmerger label:first-of-type input"), true);
   });
+
+  await withPage("manager-bridge-dom", async (page) => {
+    await openManager(page);
+    await page.fill(".clm-search", "Alice in Chains");
+    await waitCount(page, 1);
+    await page.click('.clm-card[data-index="0"]');
+    await page.click(".clm-details-actions button:has-text('Edit')");
+    await page.waitForSelector("[data-mock-overlay]");
+    assert.equal(await page.isHidden(".clm-lock"), true);
+    const events = await page.evaluate(() => window.__mockUi.events);
+    assert.deepEqual(events.map((e) => e.type), ["open-library", "edit"]);
+    assert.equal(events[1].id, "special-1");
+    // "Back to manager" restores the same search.
+    await page.click("[data-mock-overlay] button");
+    await page.click(".clm-toast-action");
+    await page.waitForSelector(".clm-lock:not([hidden])");
+    assert.equal(await page.inputValue(".clm-search"), "Alice in Chains");
+    // Chat: double-click opens the editor, the Chat button the start-chat dialog.
+    await page.click(".clm-details-actions button:has-text('Chat')");
+    await page.waitForFunction(() => window.__mockUi.events.some((e) => e.type === "chat"));
+  });
+
+  await withPage(
+    "manager-bridge-store",
+    async (page) => {
+      await openManager(page);
+      await page.fill(".clm-search", "Alice in Chains");
+      await waitCount(page, 1);
+      await page.dblclick('.clm-card[data-index="0"]');
+      await page.waitForSelector("[data-mock-overlay]");
+      let events = await page.evaluate(() => window.__mockUi.events);
+      assert.deepEqual(events, [{ type: "store-edit", id: "special-1" }]);
+      await page.click("[data-mock-overlay] button");
+      await page.click(".clm-toast-action");
+      await page.click(".clm-details-actions button:has-text('Chat')");
+      await page.waitForFunction(() => window.__mockUi.events.some((e) => e.type === "store-modal"));
+      events = await page.evaluate(() => window.__mockUi.events);
+      assert.deepEqual(events.at(-1), { type: "store-modal", modal: "start-character-chat", characterId: "special-1", characterName: "Alice in Chains" });
+      // Edits refresh Marinara's character queries.
+      await page.click("[data-mock-overlay] button");
+      await page.click("#mock-open-library", { button: "right" });
+      await page.fill(".clm-add-tag", "Rock");
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(() => window.__mockUi.events.some((e) => e.type === "invalidate"));
+      events = await page.evaluate(() => window.__mockUi.events);
+      assert.deepEqual(events.find((e) => e.type === "invalidate").queryKey, ["characters"]);
+    },
+    { query: "?react=1" },
+  );
 }

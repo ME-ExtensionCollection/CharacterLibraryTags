@@ -137,5 +137,6 @@
   }
 
   window.__mockUi.openLibrary = openLibrary;
+  window.__mockUi.showOverlay = showOverlay;
   addEventListener("DOMContentLoaded", () => document.querySelector("main").after(panel()));
 })();

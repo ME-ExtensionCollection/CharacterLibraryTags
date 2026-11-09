@@ -23,6 +23,7 @@ const CLMData = (() => {
   let loaded = false;
   let loading = null;
   const listeners = new Set();
+  const writeHooks = new Set(); // run after the manager changed characters
   const fullText = new Map(); // `${generation}\n${term}` -> Promise<Set<id>>
 
   async function request(path, init) {
@@ -38,6 +39,16 @@ const CLMData = (() => {
       throw new Error(`${init?.method ?? "GET"} ${path.split("?")[0]} failed: ${message}`);
     }
     return body;
+  }
+
+  function afterWrite() {
+    for (const hook of writeHooks) {
+      try {
+        hook();
+      } catch (error) {
+        marinara.log.debug("Character write hook failed", error);
+      }
+    }
   }
 
   function emit() {
@@ -175,7 +186,10 @@ const CLMData = (() => {
       for (const tag of add) if (!tags.some((t) => fold(t) === fold(tag))) tags.push(tag.trim());
       return { ...item, tags, updatedAt: new Date().toISOString() };
     });
-    if (updated.size) await syncGeneration();
+    if (updated.size) {
+      await syncGeneration();
+      afterWrite();
+    }
     emit();
     return result;
   }
@@ -188,6 +202,7 @@ const CLMData = (() => {
     });
     patchLocal(id, { favorite });
     await syncGeneration();
+    afterWrite();
     emit();
   }
 
@@ -256,6 +271,10 @@ const CLMData = (() => {
     tagMerger,
     tagExpansion,
     canonicalKeys,
+    onWrite(hook) {
+      writeHooks.add(hook);
+      return () => writeHooks.delete(hook);
+    },
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
