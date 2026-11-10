@@ -571,7 +571,44 @@ const CLMManager = (() => {
           'Words must all match. "two words" matches a phrase, -word excludes.\n#tag or tag:"two words" = must have, -#tag = exclude, ~tag = at least one.\ncreator:name filters by creator.',
       },
     });
-    const searchWrap = h("div.clm-search-wrap", {}, icon("search", "clm-icon clm-search-icon"), searchInput);
+    // Clears through the editing commands, so Ctrl+Z in the box brings the text back.
+    let clearedText = null; // fallback undo when execCommand is unavailable
+    const searchClear = h(
+      "button.clm-search-clear",
+      {
+        attrs: { type: "button", title: "Clear search (Ctrl+Z puts it back)", "aria-label": "Clear search", hidden: true },
+        on: {
+          pointerdown: (event) => event.preventDefault(), // keep focus in the box
+          click: () => {
+            const text = searchInput.value;
+            if (!text) return;
+            searchInput.focus();
+            searchInput.select();
+            let done = false;
+            try {
+              done = document.execCommand("delete");
+            } catch {
+              done = false;
+            }
+            if (!done || searchInput.value) {
+              clearedText = text;
+              searchInput.value = "";
+              searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+          },
+        },
+      },
+      icon("x"),
+    );
+    searchInput.addEventListener("keydown", (event) => {
+      if (clearedText !== null && !searchInput.value && (event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        searchInput.value = clearedText;
+        clearedText = null;
+        searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    const searchWrap = h("div.clm-search-wrap", {}, icon("search", "clm-icon clm-search-icon"), searchInput, searchClear);
     attachSuggest(searchInput, searchWrap, {
       compute: () => {
         const token = currentTagToken(searchInput);
@@ -595,7 +632,9 @@ const CLMManager = (() => {
       },
     });
     searchInput.addEventListener("input", () => {
+      if (searchInput.value) clearedText = null;
       absorbTagTokens(false);
+      syncSearchClear();
     });
 
     const favButton = iconButton("star", "Favorites only", () => {
@@ -1370,6 +1409,7 @@ const CLMManager = (() => {
     ui.scopeSelect.value = q.scope;
     ui.scopeBox.sync();
     if (document.activeElement !== ui.searchInput && ui.searchInput.value !== q.text) ui.searchInput.value = q.text;
+    syncSearchClear();
     ui.favButton.classList.toggle("clm-on", q.favoritesOnly);
     ui.favButton.setAttribute("aria-pressed", String(q.favoritesOnly));
     for (const button of ui.toolbar.querySelectorAll("[data-toggle]")) {
@@ -1472,6 +1512,11 @@ const CLMManager = (() => {
     } catch (error) {
       marinara.log.warn("Could not read Tag Merger's dictionary", error);
     }
+  }
+
+  function syncSearchClear() {
+    const button = ui.searchInput?.parentElement?.querySelector(".clm-search-clear");
+    if (button) button.hidden = !ui.searchInput.value;
   }
 
   function clearAll() {

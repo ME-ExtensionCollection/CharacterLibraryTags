@@ -406,6 +406,42 @@
 .clm-search {
   width: 100%;
   padding-left: 1.9rem;
+  padding-right: 1.9rem;
+}
+
+.clm-search::-webkit-search-cancel-button {
+  display: none;
+}
+
+.clm-search-clear {
+  position: absolute;
+  right: 0.3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--clm-muted);
+  cursor: pointer;
+}
+
+.clm-search-clear:hover,
+.clm-search-clear:focus-visible {
+  background: var(--clm-raised);
+  color: inherit;
+}
+
+.clm-search-clear[hidden] {
+  display: none;
+}
+
+.clm-search-clear .clm-icon {
+  width: 0.9rem;
+  height: 0.9rem;
 }
 
 /* Compact selects: icon and short label, the real select is invisible on top. */

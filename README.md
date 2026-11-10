@@ -11,7 +11,7 @@ Open it by **right-clicking the Characters button in the top bar** or **the Open
 
 **Searching**
 
-- **Search box** with a scope menu: *Name, creator & tags* (default), *Name*, *Creator*, *Tags*, or *All card text*. Every word must match. `"two words"` matches a phrase and `-word` excludes it. *All card text* uses Marinara's own catalog search, so it also reads descriptions, first messages, scenarios and creator notes.
+- **Search box** with a scope menu: *Name, creator & tags* (default), *Name*, *Creator*, *Tags*, or *All card text*. Every word must match. `"two words"` matches a phrase and `-word` excludes it. *All card text* uses Marinara's own catalog search, so it also reads descriptions, first messages, scenarios and creator notes. The × at the right end clears the box; Ctrl+Z right after puts the text back.
 - **Tag rows**: *Mandatory tags* (must have all), *At least one tag* (must have one of them) and *Excluded tags* (must have none). They combine with each other and with the search box. Suggestions show how many characters in the current results have each tag, out of the whole library.
 - **Tag syntax in the search box**: `#tag` or `tag:"two words"` is mandatory, `-#tag` is excluded, `~tag` (or `any:tag`) is at least one, and `creator:name` filters by creator. A finished tag token turns into a chip in the matching row. Typing `#` shows tag suggestions.
 - **More filters** (sliders button): tag count range, token range, date added range, untagged only, and favorites (star button).

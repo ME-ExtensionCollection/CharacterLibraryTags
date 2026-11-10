@@ -491,4 +491,24 @@ export default async function ({ withPage, assert, BASE }) {
     assert.deepEqual(await href(), []);
     assert.match(await page.textContent(".clm-details-source"), /No download link saved/);
   });
+
+  await withPage("manager-search-clear", async (page, shot) => {
+    await openManager(page);
+    assert.equal(await page.isHidden(".clm-search-clear"), true);
+    await page.fill(".clm-search", "kestrel elf");
+    const expected = expectCount({ text: "kestrel elf" });
+    await waitCount(page, expected);
+    assert.equal(await page.isVisible(".clm-search-clear"), true);
+    await shot("x");
+    await page.click(".clm-search-clear");
+    await waitCount(page, 3005);
+    assert.equal(await page.inputValue(".clm-search"), "");
+    assert.equal(await page.isHidden(".clm-search-clear"), true);
+    // Focus stays in the box; Ctrl+Z restores the text and the filter.
+    assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("clm-search")), true);
+    await page.keyboard.press("Control+z");
+    await waitCount(page, expected);
+    assert.equal(await page.inputValue(".clm-search"), "kestrel elf");
+    assert.equal(await page.isVisible(".clm-search-clear"), true);
+  });
 }
