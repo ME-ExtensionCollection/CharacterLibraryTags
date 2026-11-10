@@ -544,4 +544,51 @@ export default async function ({ withPage, assert, BASE }) {
     assert.equal(await page.inputValue(".clm-search"), "kestrel elf");
     assert.equal(await page.isVisible(".clm-search-clear"), true);
   });
+
+  await withPage("manager-details-keeps-place", async (page, shot) => {
+    await openManager(page);
+    // Big cards, scrolled into the middle of the library.
+    await page.$eval(".clm-width", (n) => {
+      n.value = n.max;
+      n.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await page.$eval(".clm-grid", (n) => (n.scrollTop = n.scrollHeight / 2));
+    await page.waitForTimeout(300);
+    const columns = () => page.$$eval(".clm-card", (cards) => new Set(cards.map((c) => c.style.transform.match(/\(([-\d.]+)px/)[1])).size);
+    const top = (id) => page.$eval(`.clm-card[data-id="${id}"]`, (n) => Math.round(n.getBoundingClientRect().top));
+    // Fewer columns means wider, taller cards: the card keeps its top unless it
+    // would then hang off the bottom, in which case it rises just enough to fit.
+    const expectedTop = (id, wanted) =>
+      page.$eval(`.clm-card[data-id="${id}"]`, (n, wanted) => {
+        const grid = n.closest(".clm-grid");
+        const viewTop = grid.getBoundingClientRect().top;
+        const gap = 10; // the grid leaves one gap of room under the card
+        return Math.round(Math.max(viewTop, Math.min(wanted, viewTop + grid.clientHeight - gap - n.getBoundingClientRect().height)));
+      }, wanted);
+    // The rightmost card fully in view (it has to change column when the grid narrows).
+    const { id, x, y } = await page.$eval(".clm-grid", (grid) => {
+      const view = grid.getBoundingClientRect();
+      const inView = [...grid.querySelectorAll(".clm-card")].filter((c) => {
+        const r = c.getBoundingClientRect();
+        return r.top >= view.top && r.bottom <= view.bottom;
+      });
+      const card = inView.reduce((a, b) => (b.getBoundingClientRect().left > a.getBoundingClientRect().left ? b : a));
+      const r = card.getBoundingClientRect();
+      return { id: card.dataset.id, x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    const before = await top(id);
+    const columnsBefore = await columns();
+    // Click in place: page.click() would scroll the card into view first.
+    await page.mouse.click(x, y);
+    await page.waitForSelector(".clm-details:not([hidden])");
+    await page.waitForTimeout(400);
+    assert.ok((await columns()) < columnsBefore, "details pane should take columns");
+    const opened = await expectedTop(id, before);
+    assert.ok(Math.abs((await top(id)) - opened) <= 1, `opened card at ${await top(id)}, expected ${opened}`);
+    await shot("open");
+    // Closing reflows back around the card just viewed.
+    await page.click(".clm-details-close");
+    await page.waitForTimeout(400);
+    assert.ok(Math.abs((await top(id)) - opened) <= 1, `card moved on close from ${opened} to ${await top(id)}`);
+  });
 }

@@ -164,6 +164,7 @@ const CLMManager = (() => {
     serverIds: null,
     serverError: "",
     selectedId: null,
+    lastViewedId: null,
     multi: new Set(), // ids picked with Ctrl/Shift-click or the card checkboxes
     anchorId: null, // last plain or Ctrl click, for Shift-click ranges
     indexedFolders: null,
@@ -854,6 +855,8 @@ const CLMManager = (() => {
       size: () => ({ width: S.cardWidth, heightFor: (w) => Math.round(w * 1.5) + 46 }),
       create: createCard,
       update: updateCard,
+      // Hold the open card in place when the details pane resizes the grid; after closing, the one just viewed.
+      anchorId: () => S.selectedId ?? S.lastViewedId,
     });
     viewport.addEventListener("click", onGridClick);
     viewport.addEventListener("dblclick", onGridDoubleClick);
@@ -1027,6 +1030,7 @@ const CLMManager = (() => {
 
   function select(id, { scroll = false } = {}) {
     S.selectedId = id;
+    if (id) S.lastViewedId = id;
     ui.grid.refresh();
     if (scroll) ui.grid.scrollToIndex(S.results.findIndex((c) => c.id === id));
     renderDetails();
