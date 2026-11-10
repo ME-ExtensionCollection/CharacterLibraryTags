@@ -229,7 +229,10 @@ export function createMockApi(options) {
   let folders = buildFolders(rows);
   const folderRow = (f) => ({ ...f, characterIds: JSON.stringify(f.characterIds) });
   let generation = 1;
-  const stats = { requests: [] };
+  const stats = { requests: [], deletes: 0, rateLimited: 0 };
+  // Optional Marinara-style rate limit on deletes: `deleteLimit` per second, then 429.
+  let deleteLimit = options.deleteLimit ?? 0;
+  let deleteWindow = { start: 0, count: 0 };
   const bump = () => {
     generation += 1;
   };
@@ -362,6 +365,16 @@ export function createMockApi(options) {
       if (method === "GET") return row ? [200, rowResponse(row)] : [404, { error: "Character not found" }];
       if (method === "PATCH") return patch(id, body);
       if (method === "DELETE") {
+        if (deleteLimit) {
+          const now = Date.now();
+          if (now - deleteWindow.start >= 1000) deleteWindow = { start: now, count: 0 };
+          deleteWindow.count += 1;
+          if (deleteWindow.count > deleteLimit) {
+            stats.rateLimited += 1;
+            return [429, { error: "Too many requests", retryAfter: 1 }];
+          }
+        }
+        stats.deletes += 1;
         if (!row) return [404, { error: "Character not found" }];
         if (id === "__professor_mari__") return [403, { error: "Professor Mari is a built-in character and cannot be deleted" }];
         rows = rows.filter((r) => r !== row);
@@ -382,6 +395,10 @@ export function createMockApi(options) {
       return folders;
     },
     reset(next = options) {
+      deleteLimit = next.deleteLimit ?? 0;
+      deleteWindow = { start: 0, count: 0 };
+      stats.deletes = 0;
+      stats.rateLimited = 0;
       rows = buildLibrary(next);
       folders = buildFolders(rows);
       bump();

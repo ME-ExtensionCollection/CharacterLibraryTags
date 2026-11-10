@@ -22,14 +22,14 @@ if (shots) mkdirSync(shots, { recursive: true });
 const browser = await pw.chromium.launch({ executablePath: process.env.CLM_CHROME || undefined, headless: true });
 let failed = 0;
 
-async function withPage(name, fn, { query = "", viewport = { width: 1440, height: 900 } } = {}) {
+async function withPage(name, fn, { query = "", viewport = { width: 1440, height: 900 }, allowErrors = null } = {}) {
   if (only && !only.includes(name)) return;
   await fetch(`${BASE}/__mock/reset`, { method: "POST" });
   const context = await browser.newContext({ viewport });
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+  page.on("console", (m) => m.type() === "error" && !allowErrors?.test(m.text()) && errors.push(m.text()));
   const shot = async (label) => shots && page.screenshot({ path: join(shots, `${name}-${label}.png`) });
   try {
     await page.goto(`${BASE}/dev/harness.html${query}`);

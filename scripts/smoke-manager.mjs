@@ -437,7 +437,28 @@ export default async function ({ withPage, assert, BASE }) {
     for (const id of picked) assert.equal(await exists(id), false);
     await waitCount(page, 2992, 2992);
     assert.equal(await page.isHidden(".clm-selbar"), true);
+    const stats = await (await fetch(`${BASE}/__mock/stats`)).json();
+    assert.ok(stats.maxDeletesInFlight > 1 && stats.maxDeletesInFlight <= 4, `in flight: ${stats.maxDeletesInFlight}`);
   });
+
+  await withPage("manager-delete-rate-limit", async (page) => {
+    // Marinara-style 429s: the run waits, retries and still deletes everything.
+    await fetch(`${BASE}/__mock/reset?deleteLimit=2`, { method: "POST" });
+    await openManager(page);
+    await page.click('.clm-card[data-index="0"]');
+    await page.click('.clm-card[data-index="9"]', { modifiers: ["Shift"] });
+    const picked = await page.$$eval(".clm-card--checked", (n) => n.map((x) => x.dataset.id));
+    await page.click(".clm-selbar .clm-btn--danger");
+    await page.fill(".clm-dialog-typed", "10");
+    await page.click(".clm-dialog-confirm");
+    await page.waitForSelector(".clm-toast:has-text('slow down')");
+    await page.waitForSelector(".clm-toast:has-text('Deleted 10 characters')", { timeout: 20000 });
+    assert.equal(await page.$(".clm-toast--error"), null);
+    for (const id of picked) assert.equal((await fetch(`${BASE}/api/characters/${id}`)).status, 404);
+    const stats = await (await fetch(`${BASE}/__mock/stats`)).json();
+    assert.ok(stats.rateLimited > 0);
+    assert.equal(stats.deletes, 10);
+  }, { allowErrors: /status of 429/ });
 
   await withPage("manager-source-link", async (page, shot) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE });

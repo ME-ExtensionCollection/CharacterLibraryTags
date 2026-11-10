@@ -42,7 +42,11 @@ const CLMData = (() => {
     }
     if (!response.ok) {
       const message = body && typeof body.error === "string" ? body.error : `HTTP ${response.status}`;
-      throw new Error(`${init?.method ?? "GET"} ${path.split("?")[0]} failed: ${message}`);
+      const error = new Error(`${init?.method ?? "GET"} ${path.split("?")[0]} failed: ${message}`);
+      error.status = response.status;
+      const retryAfter = Number(body?.retryAfter ?? response.headers?.get?.("Retry-After"));
+      if (Number.isFinite(retryAfter) && retryAfter >= 0) error.retryAfter = retryAfter;
+      throw error;
     }
     return body;
   }
@@ -283,29 +287,63 @@ const CLMData = (() => {
   /** Marinara refuses to delete its built-in guide character. */
   const PROTECTED_IDS = new Set(["__professor_mari__"]);
 
+  // Deletes run a few at a time. Marinara does the database part of each one
+  // under a global lock (it scans every chat, folder and lorebook link), so
+  // more in flight only overlaps the round trips and file cleanup. The pace cap
+  // keeps well under Marinara's shared limit of 600 API requests a minute, so
+  // its own UI and other extensions keep working during a big delete.
+  const DELETE_PARALLEL = 4;
+  const DELETE_PER_SECOND = 5;
+  const sleep = (ms) => new Promise((resolve) => marinara.setTimeout(resolve, ms));
+
   /**
-   * Permanently delete characters, one request at a time (Marinara's delete also
-   * cleans up chats, lorebook links and gallery files, so it is not cheap).
-   * `onProgress(done, total)` runs after each one; `shouldStop()` returning true
-   * stops before the next request.
+   * Permanently delete characters. `onProgress(done, total)` runs after each one;
+   * `shouldStop()` returning true stops starting new ones. A "too many requests"
+   * answer pauses every worker for the time the server asks, then retries.
    */
-  async function deleteCharacters(ids, { onProgress = () => {}, shouldStop = () => false } = {}) {
+  async function deleteCharacters(ids, { onProgress = () => {}, shouldStop = () => false, onWait = () => {} } = {}) {
     const result = { deletedIds: [], failed: [], skippedIds: [] };
     const todo = ids.filter((id) => {
       if (!PROTECTED_IDS.has(id)) return true;
       result.skippedIds.push(id);
       return false;
     });
-    for (const id of todo) {
-      if (shouldStop()) break;
-      try {
-        await request(`/api/characters/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "x-marinara-csrf": "1" } });
-        result.deletedIds.push(id);
-      } catch (error) {
-        result.failed.push({ id, error });
+    let next = 0;
+    let nextStartAt = 0; // pacing: earliest time the next request may start
+    let pausedUntil = 0; // set by a 429
+    const gap = 1000 / DELETE_PER_SECOND;
+    const deleteOne = async (id) => {
+      for (let attempt = 0; ; attempt += 1) {
+        const now = Date.now();
+        const wait = Math.max(nextStartAt, pausedUntil) - now;
+        nextStartAt = Math.max(now, nextStartAt, pausedUntil) + gap;
+        if (wait > 0) await sleep(wait);
+        try {
+          await request(`/api/characters/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "x-marinara-csrf": "1" } });
+          return;
+        } catch (error) {
+          // Already gone (deleted elsewhere): nothing left to do.
+          if (error.status === 404) return;
+          if (error.status !== 429 || attempt >= 5) throw error;
+          const seconds = Math.min(Math.max(error.retryAfter ?? 5, 1), 90);
+          pausedUntil = Math.max(pausedUntil, Date.now() + seconds * 1000);
+          onWait(seconds);
+        }
       }
-      onProgress(result.deletedIds.length + result.failed.length, todo.length);
-    }
+    };
+    const worker = async () => {
+      while (next < todo.length && !shouldStop()) {
+        const id = todo[next++];
+        try {
+          await deleteOne(id);
+          result.deletedIds.push(id);
+        } catch (error) {
+          result.failed.push({ id, error });
+        }
+        onProgress(result.deletedIds.length + result.failed.length, todo.length);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(DELETE_PARALLEL, todo.length) }, worker));
     if (result.deletedIds.length) {
       const gone = new Set(result.deletedIds);
       items = items.filter((item) => !gone.has(item.id));

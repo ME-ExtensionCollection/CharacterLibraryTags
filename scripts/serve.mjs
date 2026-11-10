@@ -27,6 +27,8 @@ const build = () => execFileSync(process.execPath, [join(ROOT, "scripts/build.mj
 build();
 
 const api = createMockApi({ count: COUNT });
+let deletesInFlight = 0;
+let maxDeletesInFlight = 0;
 
 async function readBody(req) {
   const chunks = [];
@@ -51,8 +53,13 @@ createServer(async (req, res) => {
     return res.end();
   }
   if (url.pathname === "/__mock/reset" && req.method === "POST") {
-    api.reset({ count: Number(url.searchParams.get("count")) || COUNT });
+    api.reset({ count: Number(url.searchParams.get("count")) || COUNT, deleteLimit: Number(url.searchParams.get("deleteLimit")) || 0 });
+    deletesInFlight = 0;
+    maxDeletesInFlight = 0;
     return sendJson(res, 200, { count: api.rows.length });
+  }
+  if (url.pathname === "/__mock/stats") {
+    return sendJson(res, 200, { deletes: api.stats.deletes, rateLimited: api.stats.rateLimited, maxDeletesInFlight });
   }
   if (url.pathname === "/__mock/requests") return sendJson(res, 200, api.stats.requests.splice(0));
   if (url.pathname.startsWith("/mock-avatar/")) {
@@ -60,8 +67,12 @@ createServer(async (req, res) => {
     return res.end(avatarSvg(decodeURIComponent(url.pathname.slice("/mock-avatar/".length).replace(/\.svg$/, ""))));
   }
   if (url.pathname.startsWith("/api/")) {
-    // Small delay so loading states are visible and races show up.
-    await new Promise((resolve) => setTimeout(resolve, 40));
+    // Small delay so loading states are visible and races show up. Deletes are
+    // slow in Marinara (each scans every chat), so they are slow here too.
+    const isDelete = req.method === "DELETE";
+    if (isDelete) maxDeletesInFlight = Math.max(maxDeletesInFlight, ++deletesInFlight);
+    await new Promise((resolve) => setTimeout(resolve, isDelete ? 500 : 40));
+    if (isDelete) deletesInFlight -= 1;
     const body = req.method === "GET" ? null : await readBody(req);
     const result = api.handle(req.method, url, body, req.headers);
     if (!result) return sendJson(res, 404, { error: "Mock route not found" });

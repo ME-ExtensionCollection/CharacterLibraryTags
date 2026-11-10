@@ -414,6 +414,7 @@ const CLMEdit = (() => {
         {
           shouldStop: () => stop,
           onProgress: (done, total) => (text.textContent = `Deleting ${done.toLocaleString()} of ${total.toLocaleString()}…`),
+          onWait: (seconds) => (text.textContent = `Marinara asked to slow down; waiting ${seconds} s…`),
         },
       );
       notice.remove();
