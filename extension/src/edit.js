@@ -268,30 +268,130 @@ const CLMEdit = (() => {
   let deleting = false;
 
   /**
-   * Permanently delete `cards` after asking. One character: one confirm naming it.
-   * Several: a confirm listing them, and from 10 up the count must be typed too.
-   * Runs one request at a time with a progress notice and a Stop button.
+   * A confirm dialog drawn inside the manager window. Resolves true on confirm,
+   * false on Cancel, Esc or a click outside. With `typed`, the confirm button
+   * stays disabled until that exact text is typed.
+   */
+  function confirmDialog({ title, body = [], confirmLabel = "OK", danger = false, typed = null }) {
+    const { h, icon } = CLMManager;
+    const host = CLMManager.popup ?? document.body;
+    const previousFocus = document.activeElement;
+    return new Promise((resolve) => {
+      const cancel = h("button.clm-btn.clm-dialog-cancel", { text: "Cancel", attrs: { type: "button" } });
+      const confirm = h(
+        `button.clm-btn.clm-dialog-confirm${danger ? ".clm-btn--danger-solid" : ".clm-on"}`,
+        { attrs: { type: "button" } },
+        danger ? icon("trash") : null,
+        ` ${confirmLabel}`,
+      );
+      let input = null;
+      let typedBlock = null;
+      if (typed !== null) {
+        input = h("input.clm-input.clm-dialog-typed", {
+          attrs: { type: "text", inputmode: "numeric", autocomplete: "off", spellcheck: "false", "aria-label": `Type ${typed} to confirm` },
+        });
+        typedBlock = h("label.clm-dialog-typed-row", {}, h("span", {}, "Type ", h("strong", { text: typed }), " to confirm"), input);
+        const sync = () => (confirm.disabled = input.value.replace(/[\s,.]/g, "") !== typed.replace(/[\s,.]/g, ""));
+        input.addEventListener("input", sync);
+        sync();
+      }
+      const titleId = `clm-dialog-${Date.now().toString(36)}`;
+      const dialog = h(
+        `div.clm-dialog${danger ? ".clm-dialog--danger" : ""}`,
+        { attrs: { role: "alertdialog", "aria-modal": "true", "aria-labelledby": titleId } },
+        h("h2.clm-dialog-title", { text: title, attrs: { id: titleId } }),
+        ...body,
+        typedBlock,
+        h("div.clm-dialog-actions", {}, cancel, confirm),
+      );
+      const backdrop = h("div.clm-dialog-backdrop", {}, dialog);
+      const finish = (value) => {
+        backdrop.remove();
+        if (previousFocus?.isConnected) previousFocus.focus();
+        resolve(value);
+      };
+      cancel.addEventListener("click", () => finish(false));
+      confirm.addEventListener("click", () => !confirm.disabled && finish(true));
+      backdrop.addEventListener("pointerdown", (event) => {
+        if (event.target === backdrop) finish(false);
+      });
+      backdrop.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          finish(false);
+        } else if (event.key === "Enter" && event.target === input) {
+          event.preventDefault();
+          if (!confirm.disabled) finish(true);
+        } else if (event.key === "Tab") {
+          // Keep focus inside the dialog.
+          const focusable = [...dialog.querySelectorAll("button:not(:disabled), input")];
+          const at = focusable.indexOf(document.activeElement);
+          const next = event.shiftKey ? (at <= 0 ? focusable.length - 1 : at - 1) : at === focusable.length - 1 ? 0 : at + 1;
+          event.preventDefault();
+          focusable[next]?.focus();
+        }
+        event.stopPropagation();
+      });
+      host.append(backdrop);
+      (input ?? cancel).focus();
+    });
+  }
+
+  const LIST_LIMIT = 200;
+
+  /** Scrollable list of characters (avatar, name, creator) for a dialog. */
+  function characterList(cards) {
+    const { h } = CLMManager;
+    const rows = cards.slice(0, LIST_LIMIT).map((c) =>
+      h(
+        "li.clm-dialog-char",
+        {},
+        c.item.avatarPath
+          ? h("img.clm-dialog-avatar", { attrs: { src: c.item.avatarPath, alt: "", loading: "lazy", draggable: "false" } })
+          : h("span.clm-dialog-avatar.clm-dialog-avatar--empty", { text: (c.name || "?").slice(0, 1).toUpperCase() }),
+        h("span.clm-dialog-char-name", { text: c.name || "Unnamed" }),
+        c.creator ? h("span.clm-muted", { text: `by ${c.creator}` }) : null,
+      ),
+    );
+    if (cards.length > LIST_LIMIT) rows.push(h("li.clm-dialog-more.clm-muted", { text: `…and ${(cards.length - LIST_LIMIT).toLocaleString()} more` }));
+    return h("ul.clm-dialog-list", {}, ...rows);
+  }
+
+  /**
+   * Permanently delete `cards` after asking in a dialog that lists them.
+   * From 10 up, the count must be typed too. Runs one request at a time
+   * with a progress notice and a Stop button.
    */
   async function deleteCards(cards) {
     if (deleting) return toast("A delete is already running.");
+    const { h, icon } = CLMManager;
     const protectedCards = cards.filter((c) => CLMData.isProtected(c.id));
     const targets = cards.filter((c) => !CLMData.isProtected(c.id));
     if (!targets.length) return toast(`${names(protectedCards)} is built into Marinara and cannot be deleted.`);
     const n = targets.length;
-    const listed = targets.slice(0, 12).map((c) => `  • ${c.name}${c.creator ? ` (by ${c.creator})` : ""}`);
-    if (n > 12) listed.push(`  …and ${(n - 12).toLocaleString()} more`);
-    const what = n === 1 ? `“${targets[0].name}”` : `these ${n.toLocaleString()} characters`;
-    const skipped = protectedCards.length ? `\n\n${names(protectedCards)} is built in and will be skipped.` : "";
-    const message =
-      `Permanently delete ${what}?\n\n${listed.join("\n")}\n\n` +
-      "This cannot be undone. Marinara also removes them from their chats and deletes their gallery images. " +
-      `Their chats are kept.${skipped}`;
-    if (!window.confirm(message)) return;
-    if (n >= 10) {
-      const typed = window.prompt(`To confirm, type the number of characters to delete (${n.toLocaleString()}):`, "");
-      if (typed === null) return;
-      if (typed.replace(/[\s,.]/g, "") !== String(n)) return toast("Number did not match. Nothing was deleted.");
-    }
+    const ok = await confirmDialog({
+      title: n === 1 ? `Delete “${targets[0].name}”?` : `Delete ${n.toLocaleString()} characters?`,
+      danger: true,
+      confirmLabel: n === 1 ? "Delete" : `Delete ${n.toLocaleString()}`,
+      typed: n >= 10 ? String(n) : null,
+      body: [
+        characterList(targets),
+        h(
+          "div.clm-dialog-warning",
+          {},
+          icon("alert"),
+          h(
+            "div",
+            {},
+            h("strong", { text: "This can't be undone." }),
+            " Marinara has no trash. It also removes them from their chats and deletes their gallery images; the chats themselves stay.",
+          ),
+        ),
+        protectedCards.length ? h("p.clm-muted", { text: `${names(protectedCards)} is built in and will be skipped.` }) : null,
+      ],
+    });
+    if (!ok) return;
 
     deleting = true;
     let stop = false;
@@ -351,5 +451,5 @@ const CLMEdit = (() => {
     document.getElementById("clm-all-tags")?.remove();
   });
 
-  return Object.freeze({ toast, removeTagButton, addTagField, favoriteButton, bulkTag, updateTagDatalist, folderPicker, removeFromFolderButton, deleteCards, deleteButton });
+  return Object.freeze({ toast, removeTagButton, addTagField, favoriteButton, bulkTag, updateTagDatalist, folderPicker, removeFromFolderButton, deleteCards, deleteButton, confirmDialog });
 })();

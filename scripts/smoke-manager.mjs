@@ -382,49 +382,61 @@ export default async function ({ withPage, assert, BASE }) {
   });
 
   await withPage("manager-delete", async (page, shot) => {
-    const answers = [];
-    const seen = [];
+    // Native dialogs must not appear any more.
     page.on("dialog", (dialog) => {
-      seen.push({ type: dialog.type(), message: dialog.message() });
-      const answer = answers.shift();
-      if (answer === false) return dialog.dismiss();
-      return dialog.type() === "prompt" ? dialog.accept(String(answer ?? "")) : dialog.accept();
+      throw new Error(`unexpected ${dialog.type()}: ${dialog.message()}`);
     });
     const exists = async (id) => (await fetch(`${BASE}/api/characters/${id}`)).status === 200;
     await openManager(page);
 
-    // One character from the details pane: cancel keeps it, OK deletes it.
+    // One character from the details pane: Cancel and Esc keep it, Delete deletes it.
     await page.click('.clm-card[data-index="0"]');
     const first = await page.getAttribute('.clm-card[data-index="0"]', "data-id");
-    answers.push(false);
+    const firstName = await page.textContent(".clm-details-name");
     await page.click(".clm-details-actions .clm-btn--danger");
+    await page.waitForSelector(".clm-dialog");
+    assert.equal(await page.textContent(".clm-dialog-title"), `Delete “${firstName}”?`);
+    assert.equal(await page.$$eval(".clm-dialog-char", (n) => n.length), 1);
+    assert.equal(await page.$(".clm-dialog-typed"), null);
+    await shot("dialog-one");
+    await page.click(".clm-dialog-cancel");
+    assert.equal(await page.$(".clm-dialog"), null);
+    await page.click(".clm-details-actions .clm-btn--danger");
+    await page.keyboard.press("Escape");
+    assert.equal(await page.$(".clm-dialog"), null);
+    // Esc closed only the dialog, not the manager.
+    assert.equal(await page.isVisible(".clm-popup"), true);
     assert.equal(await exists(first), true);
-    assert.match(seen[0].message, /Permanently delete “/);
-    answers.push(true);
     await page.click(".clm-details-actions .clm-btn--danger");
+    await page.click(".clm-dialog-confirm");
     await page.waitForSelector(".clm-toast:has-text('Deleted “')");
     assert.equal(await exists(first), false);
     await waitCount(page, 3004, 3004);
     assert.equal(await page.isHidden(".clm-details"), true);
 
-    // Twelve selected: wrong typed number deletes nothing, the right one deletes all.
+    // Twelve selected: the confirm button waits for the typed count.
     await page.click('.clm-card[data-index="0"]');
     await page.click('.clm-card[data-index="11"]', { modifiers: ["Shift"] });
     assert.match(await page.textContent(".clm-selbar-count"), /^12 selected/);
     const picked = await page.$$eval(".clm-card--checked", (n) => n.map((x) => x.dataset.id));
-    answers.push(true, "11");
     await page.click(".clm-selbar .clm-btn--danger");
-    await page.waitForSelector(".clm-toast:has-text('did not match')");
-    assert.equal(seen.at(-1).type, "prompt");
-    assert.match(seen.at(-2).message, /these 12 characters/);
+    await page.waitForSelector(".clm-dialog-typed");
+    assert.equal(await page.textContent(".clm-dialog-title"), "Delete 12 characters?");
+    assert.equal(await page.$$eval(".clm-dialog-char", (n) => n.length), 12);
+    assert.equal(await page.isDisabled(".clm-dialog-confirm"), true);
+    await page.fill(".clm-dialog-typed", "11");
+    assert.equal(await page.isDisabled(".clm-dialog-confirm"), true);
+    await page.keyboard.press("Enter");
+    assert.notEqual(await page.$(".clm-dialog"), null);
+    await page.fill(".clm-dialog-typed", "12");
+    assert.equal(await page.isDisabled(".clm-dialog-confirm"), false);
+    await shot("dialog-many");
     for (const id of picked) assert.equal(await exists(id), true);
-    answers.push(true, "12");
-    await page.click(".clm-selbar .clm-btn--danger");
+    await page.keyboard.press("Enter");
     await page.waitForSelector(".clm-toast:has-text('Deleted 12 characters')");
     for (const id of picked) assert.equal(await exists(id), false);
     await waitCount(page, 2992, 2992);
     assert.equal(await page.isHidden(".clm-selbar"), true);
-    await shot("manager-delete");
   });
 
   await withPage("manager-source-link", async (page, shot) => {
