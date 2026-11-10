@@ -1185,6 +1185,56 @@
   display: block;
 }
 
+/* Char Triage dislike band, 1 (likely fine) to 5 (likely disliked). */
+.clm-card-score {
+  position: absolute;
+  bottom: 2.7rem;
+  left: 0.5rem;
+  display: none;
+  min-width: 1.3rem;
+  padding: 0 0.3rem;
+  border-radius: 0.4rem;
+  background: rgb(0 0 0 / 0.65);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.3rem;
+  text-align: center;
+}
+
+.clm-card-score:not([data-band=""]) {
+  display: block;
+}
+
+.clm-card-score[data-band="4"] {
+  background: color-mix(in srgb, var(--clm-danger) 55%, rgb(0 0 0 / 0.7));
+}
+
+.clm-card-score[data-band="5"] {
+  background: var(--clm-danger);
+}
+
+.clm-dialog-learn-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.clm-dialog-learn-row input {
+  margin-top: 0.2rem;
+}
+
+.clm-dialog-learn-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-left: auto;
+  color: var(--clm-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
 /* Confirm dialog (inside the manager window) */
 
 .clm-btn--danger-solid {

@@ -417,6 +417,15 @@ const CLMData = (() => {
     }
   }
 
+  // ── Char Triage (optional, window.marinaraCharTriage) ──
+
+  /** The Char Triage API when it is running and has what the manager uses, else null. */
+  function charTriage() {
+    const api = window.marinaraCharTriage;
+    if (!api || typeof api.scores !== "function" || typeof api.beforeDelete !== "function" || typeof api.recordKeep !== "function") return null;
+    return api;
+  }
+
   // ── Tag Merger (optional, read-only API on window.marinaraTagMerger) ──
 
   function tagMerger() {
@@ -474,6 +483,7 @@ const CLMData = (() => {
     setFavorite,
     deleteCharacters,
     startDelete,
+    charTriage,
     isProtected: (id) => PROTECTED_IDS.has(id),
     tagMerger,
     tagExpansion,

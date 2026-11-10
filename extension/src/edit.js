@@ -341,22 +341,103 @@ const CLMEdit = (() => {
 
   const LIST_LIMIT = 200;
 
-  /** Scrollable list of characters (avatar, name, creator) for a dialog. */
-  function characterList(cards) {
+  /**
+   * Scrollable list of characters (avatar, name, creator) for a dialog. With
+   * `learn` ({ byId: Map id -> boolean }), each row gets a "picture" checkbox
+   * that writes into it.
+   */
+  function characterList(cards, { learn = null } = {}) {
     const { h } = CLMManager;
     const rows = cards.slice(0, LIST_LIMIT).map((c) =>
       h(
         "li.clm-dialog-char",
-        {},
+        { attrs: { "data-id": c.id } },
         c.item.avatarPath
           ? h("img.clm-dialog-avatar", { attrs: { src: c.item.avatarPath, alt: "", loading: "lazy", draggable: "false" } })
           : h("span.clm-dialog-avatar.clm-dialog-avatar--empty", { text: (c.name || "?").slice(0, 1).toUpperCase() }),
         h("span.clm-dialog-char-name", { text: c.name || "Unnamed" }),
         c.creator ? h("span.clm-muted", { text: `by ${c.creator}` }) : null,
+        learn ? learnCheckbox(c, learn) : null,
       ),
     );
     if (cards.length > LIST_LIMIT) rows.push(h("li.clm-dialog-more.clm-muted", { text: `…and ${(cards.length - LIST_LIMIT).toLocaleString()} more` }));
     return h("ul.clm-dialog-list", {}, ...rows);
+  }
+
+  function learnCheckbox(card, learn) {
+    const { h } = CLMManager;
+    const box = h("input.clm-dialog-learn", { attrs: { type: "checkbox", "aria-label": `${card.name}: deleted because of the picture` } });
+    box.checked = learn.byId.get(card.id);
+    box.addEventListener("change", () => learn.byId.set(card.id, box.checked));
+    return h("label.clm-dialog-learn-label", { attrs: { title: "Deleted because of the picture: Char Triage learns from it" } }, box, " picture");
+  }
+
+  /** "All for the picture" switch above the list; flips every row (hidden ones too). */
+  function learnAll(cards, learn, list) {
+    const { h } = CLMManager;
+    const box = h("input.clm-dialog-learn-all", { attrs: { type: "checkbox" } });
+    const sync = () => {
+      const values = cards.map((c) => learn.byId.get(c.id));
+      box.checked = values.every(Boolean);
+      box.indeterminate = !box.checked && values.some(Boolean);
+    };
+    box.addEventListener("change", () => {
+      for (const c of cards) learn.byId.set(c.id, box.checked);
+      for (const row of list.querySelectorAll(".clm-dialog-learn")) row.checked = box.checked;
+    });
+    list.addEventListener("change", (e) => e.target.classList.contains("clm-dialog-learn") && sync());
+    sync();
+    return h(
+      "label.clm-dialog-learn-row",
+      {},
+      box,
+      h("span", {}, h("strong", { text: "Deleted because of the picture" }), " — Char Triage learns from these. Untick cards you're deleting for another reason."),
+    );
+  }
+
+  /** Give Char Triage a chance to log the decision (and keep unscanned avatars) before cards go. */
+  async function logForTriage(triage, targets, learn) {
+    const timeout = new Promise((resolve) => marinara.setTimeout(() => resolve("timeout"), 15000));
+    const work = triage
+      .beforeDelete(
+        targets.map((c) => c.item),
+        { learnById: Object.fromEntries(targets.map((c) => [c.id, learn.byId.get(c.id)])) },
+      )
+      .catch((error) => marinara.log.warn("Char Triage could not log the delete", error));
+    const notice = marinara.setTimeout(() => toast("Saving for Char Triage…", { duration: 15000 }), 800);
+    const result = await Promise.race([work, timeout]);
+    marinara.clearTimeout(notice);
+    if (result === "timeout") marinara.log.warn("Char Triage took too long to log the delete; deleting anyway");
+  }
+
+  /** Mark cards as fine for Char Triage (shown only when it runs). */
+  function keepButton(cards, { label = " Keep" } = {}) {
+    const { h, icon } = CLMManager;
+    const triage = CLMData.charTriage();
+    if (!triage) return null;
+    const one = cards.length === 1;
+    const kept = one && triage.decisionOf?.(cards[0].id) === "keep";
+    const button = h(
+      "button.clm-btn.clm-keep",
+      { attrs: { type: "button", title: "These are fine: Char Triage learns from it" } },
+      icon("check"),
+      kept ? " Kept" : label,
+    );
+    if (kept) button.classList.add("clm-on");
+    button.addEventListener("click", async () => {
+      try {
+        const live = CLMData.charTriage();
+        if (!live) return toast("Char Triage is not running.", { error: true });
+        await live.recordKeep(cards.map((c) => c.item ?? c));
+        if (one) {
+          button.lastChild.textContent = " Kept";
+          button.classList.add("clm-on");
+        } else toast(`Marked ${cards.length.toLocaleString()} character${cards.length === 1 ? "" : "s"} as fine for Char Triage.`);
+      } catch (error) {
+        fail("Could not record the keep", error);
+      }
+    });
+    return button;
   }
 
   /**
@@ -374,13 +455,18 @@ const CLMEdit = (() => {
       return toast(`${names(protectedCards)} is built into Marinara and cannot be deleted.`);
     }
     const n = targets.length;
+    // Retries (confirmed) were logged the first time.
+    const triage = confirmed ? null : CLMData.charTriage();
+    const learn = triage ? { byId: new Map(targets.map((c) => [c.id, triage.learnFromDeletes() !== false])) } : null;
+    const list = characterList(targets, { learn });
     const ok = confirmed || await confirmDialog({
       title: n === 1 ? `Delete “${targets[0].name}”?` : `Delete ${n.toLocaleString()} characters?`,
       danger: true,
       confirmLabel: n === 1 ? "Delete" : `Delete ${n.toLocaleString()}`,
       typed: n >= 10 ? String(n) : null,
       body: [
-        characterList(targets),
+        learn ? learnAll(targets, learn, list) : null,
+        list,
         h(
           "div.clm-dialog-warning",
           {},
@@ -398,6 +484,7 @@ const CLMEdit = (() => {
       ],
     });
     if (!ok) return;
+    if (triage) await logForTriage(triage, targets, learn);
     // A run is going: join it (the confirm may have outlasted it, then start anew).
     if (activeDelete?.add(targets.filter((c) => !activeDelete.has(c.id)))) return;
     await runDelete(targets);
@@ -514,5 +601,5 @@ const CLMEdit = (() => {
     document.getElementById("clm-all-tags")?.remove();
   });
 
-  return Object.freeze({ toast, removeTagButton, addTagField, favoriteButton, bulkTag, updateTagDatalist, folderPicker, removeFromFolderButton, deleteCards, deleteButton, confirmDialog });
+  return Object.freeze({ toast, removeTagButton, addTagField, favoriteButton, bulkTag, updateTagDatalist, folderPicker, removeFromFolderButton, deleteCards, deleteButton, keepButton, confirmDialog });
 })();

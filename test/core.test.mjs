@@ -221,3 +221,32 @@ test("source links from Bot Browser, Chub and V3 source fields", () => {
   assert.deepEqual(CLM.sourceLinks({ extensions: { botBrowserSource: "plotlight:x" } }), []);
   assert.deepEqual(CLM.sourceLinks({}), []);
 });
+
+test("score: terms filter by Char Triage bands or raw scores", () => {
+  // a=0.95 (band 5), b=0.7 (4), c=0.1 (1), d=0.5 (3), e, f unscored
+  const scores = new Map([["a", 0.95], ["b", 0.7], ["c", 0.1], ["d", 0.5]]);
+  const q = (text) => run({ text }, { scores });
+  assert.deepEqual(q("score:5"), ["a"]);
+  assert.deepEqual(q("score:4-5"), ["a", "b"]);
+  assert.deepEqual(q("score:>3"), ["a", "b"]);
+  assert.deepEqual(q("score:<=3"), ["c", "d"]);
+  assert.deepEqual(q("score:>0.6"), ["a", "b"]);
+  assert.deepEqual(q("score:0.4-0.8"), ["b", "d"]);
+  assert.deepEqual(q("score:none"), ["e", "f"]);
+  assert.deepEqual(q("-score:5"), ["b", "c", "d", "e", "f"]); // unscored cards are "not 5" too
+  assert.deepEqual(q("score:>3 -score:5"), ["b"]);
+  assert.deepEqual(q("alice score:5"), ["a"]);
+  // Still being typed: ignored.
+  assert.equal(q("score:").length, 6);
+  assert.equal(q("score:>").length, 6);
+  // No Char Triage: a score term matches nothing rather than everything.
+  assert.deepEqual(run({ text: "score:5" }), []);
+  assert.equal(CLM.scoreBand(0), 1);
+  assert.equal(CLM.scoreBand(1), 5);
+});
+
+test("likely-disliked sort: highest score first, unscored last by newest", () => {
+  const scores = new Map([["c", 0.9], ["a", 0.2], ["d", 0.9]]);
+  const sorted = CLM.sortCards(index.cards, "dislike-desc", 1, { scores }).map((c) => c.id);
+  assert.deepEqual(sorted, ["d", "c", "a", "f", "e", "b"]);
+});

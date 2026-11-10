@@ -18,11 +18,12 @@ Open it by **right-clicking the Characters button in the top bar** or **the Open
 - **Folders**: the folder menu in the toolbar shows one of Marinara's folders, characters in no folder, or characters in any folder. `folder:name` and `-folder:name` work in the search box. Cards in a folder show a folder icon (hover for the names).
 - **Saved searches**: the menu next to the search box saves the current search, tag rows, filters and sort under a name, loads it again, or deletes it. They are kept in the extension's storage.
 - **Tag cloud** (# button): the most common tags in the current results. Click a tag to require it, Shift-click to add it to *At least one*, and Alt-click or right-click to exclude it. The same works on tags in the details pane.
+- **Char Triage scores**: with [Char Triage](../CharTriage) running, `score:5` (its 1–5 band), `score:4-5`, `score:>3`, `score:>0.8` (a decimal point means the raw 0–1 score) and `score:none` filter by how likely you are to dislike a card, and `-score:…` excludes. Without Char Triage, a score term matches nothing.
 - **Tag Merger**: with Tag Merger 0.1.1 or later running, *Canonical tags only* limits suggestions, the cloud and the details pane to canonical tags. *Match variant spellings* matches through Tag Merger's dictionary, so `Elf` also finds `elves` and anything that implies Elf.
 
 **Browsing**
 
-- Sort by name, tag count, date added, last updated, token estimate, creator, favorites first, or random (with a reshuffle button). The dice button picks a random character from the results.
+- Sort by name, tag count, date added, last updated, token estimate, creator, favorites first, random (with a reshuffle button), or *Likely disliked first* (Char Triage's score, unscored cards last). The dice button picks a random character from the results.
 - The card grid only renders what is on screen, so large libraries scroll smoothly. The slider sets the card size.
 - Arrow keys, Page Up/Down, Home and End move the selection when the grid has focus, and `/` jumps to the search box.
 - The details pane shows the avatar, creator (click to list everything by them), version, dates, token estimate and tags, plus the description, first message, scenario, personality, creator notes and alternate greetings, loaded when you select the character.
@@ -31,6 +32,7 @@ Open it by **right-clicking the Characters button in the top bar** or **the Open
 
 - **Edit** (or double-click or Enter) opens Marinara's full-screen character editor. **Chat** opens Marinara's start-chat dialog. A notice then offers to go back to the manager.
 - **Favorite** toggles the favorite flag.
+- **Char Triage**: when it runs, cards show their 1–5 band (5 = likely disliked), the toolbar has a **Triage** button for its panel, and **Keep** (details pane and selection bar) tells it a card is fine. Cards you open in the details pane and don't delete count as a weak keep when you close the manager. The delete dialog has *Deleted because of the picture*, ticked by default (Char Triage's setting), with a checkbox per card: untick cards deleted for another reason so the model doesn't learn from them. While the list is sorted or filtered by score, new scores wait behind a **New scores** button so the list doesn't reshuffle under you.
 - Add a tag with the *+ tag* field and remove one with its ×. Both offer Undo.
 - **Selecting several characters**: Ctrl-click (Cmd on Mac) or the checkbox on a card adds it to the selection, Shift-click selects a range, and Ctrl+A in the grid selects every result. Once something is selected, a plain click anywhere on a card adds it or takes it out. A bar then lets you add or remove a tag on just the selection, add it to a folder, take it out of one, or make a new folder from it. Esc clears the selection.
 - **Folders in the details pane**: the character's folders are listed under its tags. Click one to show that folder, use × to take the character out, or *+ folder* to add it to one.

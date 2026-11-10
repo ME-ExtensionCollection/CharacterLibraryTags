@@ -684,4 +684,111 @@ export default async function ({ withPage, assert, BASE }) {
     }).catch(() => false);
     assert.ok(onScreen, `${survivor} (next after the deleted top card) not on screen`);
   });
+
+  await withPage("manager-triage", async (page, shot) => {
+    await openManager(page);
+    const log = () => page.evaluate(() => window.__triageLog);
+    // Every badge on screen shows its card's band (blank when unscored).
+    const badges = () =>
+      page.$$eval(".clm-card", (cards) => {
+        const scores = window.marinaraCharTriage.scores();
+        return cards.map((c) => {
+          const s = scores.get(c.dataset.id);
+          return [c.querySelector(".clm-card-score").textContent, s === undefined ? "" : String(Math.min(5, 1 + Math.floor(s * 5)))];
+        });
+      });
+    const shown = await badges();
+    assert.ok(shown.some(([, want]) => want === "") && shown.some(([, want]) => want === "5"));
+    for (const [got, want] of shown) assert.equal(got, want);
+    // Triage button opens Char Triage's panel.
+    await page.click(".clm-triage");
+    assert.equal(await page.evaluate(() => window.__triage.opened), 1);
+
+    // score: filter, counted the same way as core.js.
+    const scores = await page.evaluate(() => Object.fromEntries(window.marinaraCharTriage.scores()));
+    const ids = await page.evaluate(async () => (await (await fetch("/api/characters/catalog?view=summary")).json()).items.map((i) => i.id));
+    const inBand5 = ids.filter((id) => id in scores && Math.min(5, 1 + Math.floor(scores[id] * 5)) === 5).length;
+    await page.fill(".clm-search", "score:5");
+    await waitCount(page, inBand5);
+    await page.fill(".clm-search", "");
+    await waitCount(page, 3005);
+
+    // Likely disliked first: band 5 on top. New scores wait for the button.
+    await page.selectOption("select[aria-label='Sort order']", "dislike-desc");
+    await page.waitForFunction(() => document.querySelector('.clm-card[data-index="0"] .clm-card-score')?.textContent === "5");
+    const firstBefore = await page.getAttribute('.clm-card[data-index="0"]', "data-id");
+    await page.evaluate(() => window.__triage.retrain(3));
+    await page.waitForSelector(".clm-scores-pending:not([hidden])");
+    assert.equal(await page.getAttribute('.clm-card[data-index="0"]', "data-id"), firstBefore);
+    await shot("pending");
+    await page.click(".clm-scores-pending");
+    await page.waitForSelector(".clm-scores-pending", { state: "hidden" });
+    await page.waitForFunction((before) => document.querySelector('.clm-card[data-index="0"]')?.dataset.id !== before, firstBefore);
+    // Back to a normal sort: new scores just apply.
+    await page.selectOption("select[aria-label='Sort order']", "created-desc");
+    await page.evaluate(() => window.__triage.retrain(0));
+    await page.waitForFunction(() => {
+      const scores = window.marinaraCharTriage.scores();
+      return [...document.querySelectorAll(".clm-card")].every((c) => {
+        const s = scores.get(c.dataset.id);
+        return c.querySelector(".clm-card-score").textContent === (s === undefined ? "" : String(Math.min(5, 1 + Math.floor(s * 5))));
+      });
+    });
+    assert.equal(await page.isHidden(".clm-scores-pending"), true);
+
+    // Keep from the details pane.
+    await page.click('.clm-card[data-index="0"]');
+    const keptId = await page.getAttribute('.clm-card[data-index="0"]', "data-id");
+    await page.click(".clm-details-actions .clm-keep");
+    await page.waitForSelector(".clm-details-actions .clm-keep:has-text('Kept')");
+    // Keep from the selection bar.
+    await page.click('.clm-card[data-index="2"]', { modifiers: ["Control"] });
+    await page.click('.clm-card[data-index="3"]', { modifiers: ["Control"] });
+    await page.click(".clm-selbar-keep");
+    await page.waitForSelector(".clm-toast:has-text('as fine for Char Triage')");
+    const keeps = (await log()).filter((d) => d.decision === "keep").map((d) => d.id);
+    assert.equal(keeps[0], keptId);
+    assert.equal(keeps.length, 4); // card 0 (details), then 0, 2, 3 (selection started from the open card)
+
+    // Delete dialog: everything "for the picture" by default, one unticked.
+    await page.click('.clm-card[data-index="5"]');
+    await page.click('.clm-card[data-index="7"]', { modifiers: ["Shift"] });
+    const picked = await page.$$eval(".clm-card--checked", (n) => n.map((x) => x.dataset.id).sort());
+    await page.click(".clm-selbar .clm-btn--danger");
+    await page.waitForSelector(".clm-dialog-learn-all");
+    assert.equal(await page.isChecked(".clm-dialog-learn-all"), true);
+    await page.uncheck(`.clm-dialog-char[data-id="${picked[1]}"] .clm-dialog-learn`);
+    assert.equal(await page.evaluate(() => document.querySelector(".clm-dialog-learn-all").indeterminate), true);
+    await shot("dialog");
+    await page.click(".clm-dialog-confirm");
+    await page.waitForSelector(".clm-toast:has-text('Deleted 3 characters')");
+    const deletes = (await log()).filter((d) => d.decision === "delete");
+    assert.deepEqual(deletes.map((d) => [d.id, d.learn, d.isItem]).sort(), picked.map((id, i) => [id, i !== 1, true]));
+
+    // Opened but not decided: a weak keep when the manager closes.
+    await page.click('.clm-card[data-index="20"]');
+    const viewed = await page.getAttribute('.clm-card[data-index="20"]', "data-id");
+    await page.click(".clm-close");
+    const implied = (await log()).filter((d) => d.decision === "implied-keep").map((d) => d.id);
+    assert.ok(implied.includes(viewed));
+    assert.ok(!implied.includes(keptId), "already kept explicitly");
+    assert.ok(!picked.some((id) => implied.includes(id)), "deleted cards are not kept");
+  }, { query: "?ctr=1" });
+
+  await withPage("manager-without-triage", async (page) => {
+    await openManager(page);
+    assert.equal(await page.isHidden(".clm-triage"), true);
+    await page.click('.clm-card[data-index="0"]');
+    assert.equal(await page.$(".clm-details-actions .clm-keep"), null);
+    // Without Char Triage a score term matches nothing.
+    await page.fill(".clm-search", "score:5");
+    await waitCount(page, 0);
+    await page.fill(".clm-search", "");
+    await page.click('.clm-card[data-index="1"]', { modifiers: ["Control"] });
+    await page.click(".clm-selbar .clm-btn--danger");
+    await page.waitForSelector(".clm-dialog");
+    assert.equal(await page.$(".clm-dialog-learn-all"), null);
+    assert.equal(await page.$(".clm-dialog-learn"), null);
+    assert.equal(await page.isHidden(".clm-selbar-keep"), true);
+  });
 }

@@ -30,6 +30,7 @@ const CLM = (() => {
     "creator-asc": "Creator A-Z",
     favorites: "Favorites first",
     random: "Random",
+    "dislike-desc": "Likely disliked first",
   });
 
   function emptyQuery() {
@@ -154,10 +155,12 @@ const CLM = (() => {
   //   ~tag  any:x     at least one of these tags
   //   creator:x       creator contains x       creator:"two words"
   //   folder:x        in a folder whose name contains x            -folder:x  not in one
+  //   score:5         Char Triage dislike band 1-5     score:4-5  score:>3  score:<=2
+  //   score:>0.8      the raw 0-1 score (a decimal point means raw)   score:none  unscored
   //
   // Tag tokens become chips in the UI (takeTagTokens); the rest stays as text.
 
-  const TOKEN = /(-|!)?(#|~|tag:|any:|creator:|folder:)?(?:"([^"]*)"?|(\S+))/giu;
+  const TOKEN = /(-|!)?(#|~|tag:|any:|creator:|folder:|score:)?(?:"([^"]*)"?|(\S+))/giu;
 
   /** @returns {Array<{kind: string, value: string, start: number, end: number, closed: boolean}>} */
   function tokenize(text) {
@@ -172,12 +175,59 @@ const CLM = (() => {
       else if (prefix === "~" || prefix === "any:") kind = neg ? "excluded" : "anyOf";
       else if (prefix === "creator:") kind = neg ? "notCreator" : "creator";
       else if (prefix === "folder:") kind = neg ? "notFolder" : "folder";
+      else if (prefix === "score:") kind = neg ? "notScore" : "score";
       else kind = neg ? "notText" : "text";
       // A lone "-", "#" or "~" is a token still being typed.
       if ((kind === "text" || kind === "notText") && /^[-!#~"]*$/u.test(value)) continue;
+      // So is a bare prefix ("creator:", "score:") with nothing after it yet.
+      if ((kind === "text" || kind === "notText") && /^(tag|any|creator|folder|score):$/iu.test(value)) continue;
       out.push({ kind, value, start: m.index, end: m.index + whole.length, closed });
     }
     return out;
+  }
+
+  /**
+   * `score:` values. Whole numbers are Char Triage's 1-5 bands, anything with a
+   * decimal point is the raw 0-1 score. Returns { unit, min, max, minOpen, maxOpen }
+   * or { none: true }, or null when it can't be read (still being typed).
+   */
+  function parseScore(value) {
+    const v = String(value).trim().toLowerCase();
+    if (v === "none") return { none: true };
+    const num = "(\\d+(?:\\.\\d*)?|\\.\\d+)";
+    let m = v.match(new RegExp(`^${num}\\s*-\\s*${num}$`, "u"));
+    if (m) {
+      const unit = m[1].includes(".") || m[2].includes(".") ? "raw" : "band";
+      return { unit, min: Math.min(+m[1], +m[2]), max: Math.max(+m[1], +m[2]), minOpen: false, maxOpen: false };
+    }
+    m = v.match(new RegExp(`^(>=|<=|>|<|=)?${num}$`, "u"));
+    if (!m) return null;
+    const n = +m[2];
+    const unit = m[2].includes(".") ? "raw" : "band";
+    switch (m[1]) {
+      case ">":
+        return { unit, min: n, max: Infinity, minOpen: true, maxOpen: false };
+      case ">=":
+        return { unit, min: n, max: Infinity, minOpen: false, maxOpen: false };
+      case "<":
+        return { unit, min: -Infinity, max: n, minOpen: false, maxOpen: true };
+      case "<=":
+        return { unit, min: -Infinity, max: n, minOpen: false, maxOpen: false };
+      default:
+        return { unit, min: n, max: n, minOpen: false, maxOpen: false };
+    }
+  }
+
+  /** Char Triage's band for a 0-1 score. */
+  const scoreBand = (score) => Math.min(5, 1 + Math.floor(score * 5));
+
+  function scoreMatches(range, score) {
+    if (range.none) return score === undefined;
+    if (score === undefined) return false;
+    const x = range.unit === "band" ? scoreBand(score) : score;
+    if (range.minOpen ? x <= range.min : x < range.min) return false;
+    if (range.maxOpen ? x >= range.max : x > range.max) return false;
+    return true;
   }
 
   /**
@@ -186,8 +236,13 @@ const CLM = (() => {
    * the UI turns them into chips.
    */
   function parseSearch(text) {
-    const parsed = { words: [], notWords: [], mandatory: [], anyOf: [], excluded: [], creators: [], notCreators: [], folders: [], notFolders: [] };
+    const parsed = { words: [], notWords: [], mandatory: [], anyOf: [], excluded: [], creators: [], notCreators: [], folders: [], notFolders: [], scores: [] };
     for (const token of tokenize(text)) {
+      if (token.kind === "score" || token.kind === "notScore") {
+        const range = parseScore(token.value);
+        if (range) parsed.scores.push({ ...range, negate: token.kind === "notScore" });
+        continue;
+      }
       const key = normalizeTag(token.value);
       if (!key) continue;
       if (token.kind === "text") parsed.words.push(key);
@@ -247,9 +302,11 @@ const CLM = (() => {
   /**
    * Compile a query into a predicate over index cards.
    * @param {object} query see emptyQuery()
-   * @param {{serverIds?: Set<string>|null}} [extra]
+   * @param {{serverIds?: Set<string>|null, scores?: Map<string, number>|null}} [extra]
    *   serverIds: ids matched by the server's full-text search, for scope "all".
    *   null while that request is pending: then the text matches locally ("any").
+   *   scores: Char Triage's dislike scores, for score: terms. Without them a
+   *   score: term matches nothing (better than silently matching everything).
    */
   function compile(query, extra = {}) {
     const parsed = parseSearch(query.text ?? "");
@@ -263,6 +320,8 @@ const CLM = (() => {
     const notWords = parsed.notWords;
     const useServer = serverIds !== null && words.length > 0;
     const { creators, notCreators, folders, notFolders } = parsed;
+    const scoreTerms = parsed.scores;
+    const scores = extra.scores ?? null;
     const folder = query.folder ?? null;
     const created = query.created ?? {};
     const createdRange = { min: created.from ?? null, max: created.to ?? null };
@@ -293,6 +352,11 @@ const CLM = (() => {
       } else if (folder !== null && !card.folderIds.includes(folder)) return false;
       for (const f of folders) if (!card.folderText.includes(f)) return false;
       for (const f of notFolders) if (card.folderText.includes(f)) return false;
+      if (scoreTerms.length) {
+        if (!scores) return false;
+        const score = scores.get(card.id);
+        for (const range of scoreTerms) if (scoreMatches(range, score) === range.negate) return false;
+      }
       if (useServer) {
         if (!serverIds.has(card.id)) return false;
       } else if (words.length) {
@@ -330,9 +394,14 @@ const CLM = (() => {
 
   const byName = (a, b) => collator.compare(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-  function sortCards(cards, sort, seed = 1) {
+  /** `scores` (Char Triage, id -> 0..1) is only read by "dislike-desc"; unscored cards go last, newest first. */
+  function sortCards(cards, sort, seed = 1, { scores = null } = {}) {
     const list = [...cards];
     switch (sort) {
+      case "dislike-desc": {
+        const at = (c) => scores?.get(c.id) ?? -1;
+        return list.sort((a, b) => at(b) - at(a) || b.created - a.created || byName(a, b));
+      }
       case "name-desc":
         return list.sort((a, b) => byName(b, a));
       case "tags-desc":
@@ -547,6 +616,8 @@ const CLM = (() => {
     serverTerms,
     filter,
     sortCards,
+    parseScore,
+    scoreBand,
     facetCounts,
     suggestTags,
     topTags,

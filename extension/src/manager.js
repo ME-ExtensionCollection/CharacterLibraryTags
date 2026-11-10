@@ -165,6 +165,10 @@ const CLMManager = (() => {
     serverError: "",
     selectedId: null,
     lastViewedId: null,
+    // Char Triage (optional): dislike scores, and new ones held back while they would reorder the list.
+    scores: null,
+    scoresPending: false,
+    viewed: new Set(), // opened in the details pane this session (implied keeps on close)
     multi: new Set(), // ids picked with Ctrl/Shift-click or the card checkboxes
     anchorId: null, // last plain or Ctrl click, for Shift-click ranges
     indexedFolders: null,
@@ -638,6 +642,16 @@ const CLMManager = (() => {
       syncSearchClear();
     });
 
+    const triageButton = h(
+      "button.clm-btn.clm-triage",
+      { attrs: { type: "button", title: "Char Triage: scan, scores, tags you delete (Alt+Shift+T)", hidden: true }, on: { click: () => CLMData.charTriage()?.openPanel?.() } },
+      "Triage",
+    );
+    const scoresButton = h(
+      "button.clm-btn.clm-on.clm-scores-pending",
+      { attrs: { type: "button", title: "Char Triage has new scores. Apply them (the order changes).", hidden: true }, on: { click: () => applyScores() } },
+      "New scores",
+    );
     const favButton = iconButton("star", "Favorites only", () => {
       S.query.favoritesOnly = !S.query.favoritesOnly;
       update();
@@ -698,7 +712,7 @@ const CLMManager = (() => {
         toggleButton("sliders", "More filters", "showAdvanced"),
         toggleButton("hash", "Tag cloud", "showCloud"),
       ),
-      h("div.clm-toolbar-group", {}, sortSelect, reshuffle),
+      h("div.clm-toolbar-group", {}, sortSelect, reshuffle, scoresButton),
       h("div.clm-toolbar-group.clm-grow", {}, scopeBox, searchWrap, presetBox),
       h(
         "div.clm-toolbar-group",
@@ -708,6 +722,7 @@ const CLMManager = (() => {
         iconButton("dice", "Random character", pickRandom),
         iconButton("refresh", "Reload the library", () => void refresh(true)),
         widthSlider,
+        triageButton,
       ),
       h("div.clm-toolbar-group.clm-toolbar-end", {}, count, clearButton, iconButton("x", "Close (Esc)", close, "clm-close")),
     );
@@ -832,6 +847,8 @@ const CLMManager = (() => {
       presetBox,
       folderBox,
       favButton,
+      triageButton,
+      scoresButton,
       count,
       clearButton,
       widthSlider,
@@ -908,7 +925,8 @@ const CLMManager = (() => {
     const meta = h("div.clm-card-meta");
     const check = h("button.clm-card-check", { attrs: { type: "button", tabindex: "-1", "aria-label": "Select" } }, icon("check"));
     const folder = h("span.clm-card-folder", {}, icon("folder"));
-    node.append(media, star, name, meta, check, folder);
+    const score = h("span.clm-card-score");
+    node.append(media, star, name, meta, check, folder, score);
     return node;
   }
 
@@ -934,6 +952,14 @@ const CLMManager = (() => {
     node.classList.toggle("clm-card--in-folder", folders.length > 0);
     if (folders.length) node.children[5].title = `In ${folders.join(", ")}`;
     node.classList.toggle("clm-card--fav", card.favorite);
+    const score = S.scores?.get(card.id);
+    const band = score === undefined ? "" : String(CLM.scoreBand(score));
+    const badge = node.children[6];
+    if (badge.dataset.band !== band) {
+      badge.dataset.band = band;
+      badge.textContent = band;
+      badge.title = band ? `Char Triage: ${band} of 5 (${Math.round(score * 100)}% likely disliked)` : "";
+    }
     node.setAttribute("aria-selected", String(card.id === S.selectedId));
   }
 
@@ -1030,10 +1056,66 @@ const CLMManager = (() => {
 
   function select(id, { scroll = false } = {}) {
     S.selectedId = id;
-    if (id) S.lastViewedId = id;
+    if (id) {
+      S.lastViewedId = id;
+      S.viewed.add(id);
+    }
     ui.grid.refresh();
     if (scroll) ui.grid.scrollToIndex(S.results.findIndex((c) => c.id === id));
     renderDetails();
+  }
+
+  // ── Char Triage ──
+
+  /** Do scores decide what is shown or where (so new ones would move cards under you)? */
+  const scoresShape = () => S.sort === "dislike-desc" || /(^|\s)-?score:/iu.test(S.query.text ?? "");
+
+  function loadScores() {
+    S.scores = CLMData.charTriage()?.scores() ?? null;
+    S.scoresPending = false;
+  }
+
+  function applyScores() {
+    loadScores();
+    update();
+  }
+
+  /**
+   * Char Triage retrains after decisions and while scanning. Badges update at
+   * once; when the scores sort or filter the list, the new ones wait for the
+   * "New scores" button (or the next open), so the list does not reshuffle
+   * while you work through it.
+   */
+  const onTriageChanged = () => {
+    if (!S.built) return;
+    if (!S.open || !S.scores || !scoresShape()) applyScores();
+    else {
+      S.scoresPending = true;
+      update();
+    }
+  };
+  window.addEventListener("marinara-char-triage:changed", onTriageChanged);
+
+  async function keepSelected() {
+    const triage = CLMData.charTriage();
+    const cards = selectedCards();
+    if (!triage || !cards.length) return;
+    try {
+      await triage.recordKeep(cards.map((c) => c.item));
+      CLMEdit.toast(`Marked ${plural(cards.length, "character")} as fine for Char Triage.`);
+      clearMulti();
+    } catch (error) {
+      CLMEdit.toast(`Could not record the keep: ${error.message}`, { error: true });
+    }
+  }
+
+  /** Cards opened in the details pane and not deleted count as a weak "fine" for Char Triage. */
+  function recordImpliedKeeps() {
+    const triage = CLMData.charTriage();
+    const ids = [...S.viewed].filter((id) => S.index?.byId.has(id));
+    S.viewed.clear();
+    if (!triage || !ids.length) return;
+    void triage.recordKeep(ids.map((id) => S.index.byId.get(id).item), { implied: true }).catch((error) => marinara.log.warn("Char Triage could not record implied keeps", error));
   }
 
   function pickRandom() {
@@ -1112,6 +1194,12 @@ const CLMManager = (() => {
       folderSlot,
       h("span.clm-selbar-sep"),
       h(
+        "button.clm-btn.clm-selbar-keep",
+        { attrs: { type: "button", title: "These are fine: Char Triage learns from it" }, on: { click: () => void keepSelected() } },
+        icon("check"),
+        " Keep",
+      ),
+      h(
         "button.clm-btn.clm-btn--danger",
         { attrs: { type: "button", title: "Permanently delete the selected characters (asks first)" }, on: { click: () => void CLMEdit.deleteCards(selectedCards()) } },
         icon("trash"),
@@ -1124,6 +1212,7 @@ const CLMManager = (() => {
       render() {
         const cards = selectedCards();
         node.hidden = cards.length === 0;
+        node.querySelector(".clm-selbar-keep").hidden = !CLMData.charTriage();
         if (!cards.length) {
           lastSignature = "";
           return;
@@ -1245,6 +1334,7 @@ const CLMManager = (() => {
       CLMEdit.favoriteButton(card),
       h("button.clm-btn", { attrs: { type: "button", title: "Open Marinara's character editor" }, on: { click: () => void CLMBridge.edit(item) } }, icon("pencil"), " Edit"),
       h("button.clm-btn", { attrs: { type: "button", title: "Start a chat with this character" }, on: { click: () => void CLMBridge.chat(item) } }, icon("chat"), " Chat"),
+      CLMEdit.keepButton([card]),
       CLMData.isProtected(card.id) ? null : CLMEdit.deleteButton([card]),
     );
 
@@ -1399,8 +1489,8 @@ const CLMManager = (() => {
   function compute() {
     if (S.indexedItems !== CLMData.items || S.indexedFolders !== CLMData.folders) rebuildIndex();
     scheduleServerSearch();
-    const filtered = CLM.filter(S.index, S.query, { serverIds: S.serverIds });
-    S.results = CLM.sortCards(filtered, S.sort, S.seed);
+    const filtered = CLM.filter(S.index, S.query, { serverIds: S.serverIds, scores: S.scores });
+    S.results = CLM.sortCards(filtered, S.sort, S.seed, { scores: S.scores });
     S.facets = CLM.facetCounts(S.results);
   }
 
@@ -1412,12 +1502,16 @@ const CLMManager = (() => {
   function render() {
     renderFrame = 0;
     if (!S.open) return;
+    // Held-back scores no longer move anything once the sort/filter stops using them.
+    if (S.scoresPending && !scoresShape()) loadScores();
     compute();
     const q = S.query;
 
     // Toolbar state
     ui.sortSelect.value = S.sort;
     ui.reshuffle.hidden = S.sort !== "random";
+    ui.triageButton.hidden = !CLMData.charTriage();
+    ui.scoresButton.hidden = !S.scoresPending;
     ui.scopeSelect.value = q.scope;
     ui.scopeBox.sync();
     if (document.activeElement !== ui.searchInput && ui.searchInput.value !== q.text) ui.searchInput.value = q.text;
@@ -1581,6 +1675,7 @@ const CLMManager = (() => {
     }
     S.open = true;
     ui.lock.hidden = false;
+    loadScores();
     unsubscribe ??= CLMData.subscribe(() => {
       S.detailsDirty = true;
       update();
@@ -1591,15 +1686,16 @@ const CLMManager = (() => {
     await refresh(false);
   }
 
-  function close() {
+  function close({ hiding = false } = {}) {
     if (!S.open) return;
     S.open = false;
     ui.lock.hidden = true;
     marinara.clearTimeout(detailTimer);
+    if (!hiding) recordImpliedKeeps();
   }
 
   /** Hide without losing state (the bridge uses this while Marinara's own UI opens). */
-  const hide = close;
+  const hide = () => close({ hiding: true });
   const show = () => void open();
 
   function onKeyDown(event) {
@@ -1629,6 +1725,7 @@ const CLMManager = (() => {
 
   marinara.onCleanup(() => {
     window.removeEventListener("marinara-tag-merger:changed", onTagMergerChanged);
+    window.removeEventListener("marinara-char-triage:changed", onTriageChanged);
     unsubscribe?.();
     if (renderFrame) cancelAnimationFrame(renderFrame);
     marinara.clearTimeout(serverTimer);
