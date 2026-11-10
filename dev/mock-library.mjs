@@ -105,6 +105,14 @@ export function buildLibrary({ count = 3000, seed = 1 } = {}) {
       },
     });
   }
+  // Where the special cards came from (see CLM.sourceLinks).
+  const SPECIAL_SOURCES = [
+    { botBrowserSource: "chub:kestrel/alice-1234", chub: { id: "kestrel/alice-1234" } },
+    { chub: { full_path: "q/alice-in-chains" } },
+    {},
+    { botBrowserSource: "janny:9f2c" },
+    {},
+  ];
   // A few hand-made cards worth seeing.
   const special = [
     { name: "Alice", tags: ["Female", "Fantasy", "Elf"], creator: "Kestrel" },
@@ -131,7 +139,8 @@ export function buildLibrary({ count = 3000, seed = 1 } = {}) {
         first_mes: "Hello.",
         creator_notes: "",
         summary: "",
-        extensions: { fav: i === 0 },
+        extensions: { fav: i === 0, ...SPECIAL_SOURCES[i] },
+        ...(i === 4 ? { source: ["https://example.com/cards/messy-mel", "javascript:alert(1)"] } : {}),
         _tokenPad: 100 * i,
       },
     }),

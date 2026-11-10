@@ -962,6 +962,31 @@
   gap: 0.35rem;
 }
 
+.clm-details-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.clm-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.clm-source-link {
+  color: var(--clm-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.clm-source-copy {
+  width: 1.6rem;
+  height: 1.6rem;
+}
+
 .clm-details-tags {
   display: flex;
   flex-wrap: wrap;

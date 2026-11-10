@@ -438,8 +438,70 @@ const CLM = (() => {
     );
   }
 
+  // ── Where a card came from ──
+
+  // Marinara's Bot Browser saves `extensions.botBrowserSource = "<site>:<id>"` (and
+  // `extensions[site].id`); the page addresses match BotBrowserView.tsx. Cards
+  // downloaded from Chub elsewhere carry `extensions.chub.full_path`, and V3 cards
+  // may list addresses in `source`.
+  const SOURCE_SITES = {
+    chub: { label: "Chub", url: (id) => `https://chub.ai/characters/${encodeURI(id)}` },
+    janny: {
+      label: "JannyAI",
+      url: (id, name) => `https://jannyai.com/characters/${encodeURIComponent(id)}_character-${String(name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+    },
+    pygmalion: { label: "Pygmalion", url: (id) => `https://pygmalion.chat/character/${encodeURIComponent(id)}` },
+    wyvern: { label: "Wyvern", url: (id) => `https://app.wyvern.chat/characters/${encodeURIComponent(id)}` },
+    datacat: { label: "DataCat", url: (id) => `https://datacat.run/characters/${encodeURIComponent(id)}` },
+  };
+
+  const webUrl = (value) => {
+    if (typeof value !== "string") return null;
+    try {
+      const url = new URL(value.trim());
+      return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Links to the page(s) a character was downloaded from, from its full card data
+   * (the `data` object of GET /api/characters/:id). Returns [{ label, url }] with
+   * only http(s) addresses, most specific first, without duplicates.
+   */
+  function sourceLinks(data) {
+    const out = [];
+    const add = (label, url) => {
+      const safe = webUrl(url);
+      if (safe && !out.some((l) => l.url === safe)) out.push({ label, url: safe });
+    };
+    const ext = data && typeof data.extensions === "object" && data.extensions ? data.extensions : {};
+    const fromSite = (site, id) => {
+      const known = SOURCE_SITES[site];
+      if (known && typeof id === "string" && id.trim()) add(known.label, known.url(id.trim(), data.name));
+    };
+    if (typeof ext.botBrowserSource === "string") {
+      const at = ext.botBrowserSource.indexOf(":");
+      if (at > 0) fromSite(ext.botBrowserSource.slice(0, at), ext.botBrowserSource.slice(at + 1));
+    }
+    for (const site of Object.keys(SOURCE_SITES)) {
+      const id = ext[site]?.id;
+      if (typeof id === "string" || typeof id === "number") fromSite(site, String(id));
+    }
+    const chubPath = ext.chub?.full_path ?? ext.chub?.fullPath;
+    if (typeof chubPath === "string" && chubPath.includes("/")) fromSite("chub", chubPath);
+    const sources = Array.isArray(data?.source) ? data.source : [data?.source];
+    for (const value of sources) {
+      const url = webUrl(value);
+      if (url) add(new URL(url).hostname.replace(/^www\./, ""), url);
+    }
+    return out;
+  }
+
   return Object.freeze({
     normalizeTag,
+    sourceLinks,
     SCOPES,
     SORTS,
     emptyQuery,

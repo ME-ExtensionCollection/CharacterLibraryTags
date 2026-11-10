@@ -54,6 +54,11 @@ const CLMManager = (() => {
     plus: [["path", { d: "M5 12h14M12 5v14" }]],
     folder: [["path", { d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" }]],
     check: [["path", { d: "M20 6 9 17l-5-5" }]],
+    link: [["path", { d: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" }]],
+    copy: [
+      ["rect", { x: "8", y: "8", width: "14", height: "14", rx: "2" }],
+      ["path", { d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" }],
+    ],
     trash: [["path", { d: "M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6" }]],
     bookmark: [["path", { d: "m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" }]],
   };
@@ -1194,6 +1199,7 @@ const CLMManager = (() => {
       CLMData.isProtected(card.id) ? null : CLMEdit.deleteButton([card]),
     );
 
+    const sourceRow = h("div.clm-details-source", { attrs: { hidden: true } });
     const drawers = h("div.clm-drawers");
     const summary = h("p.clm-details-summary", { text: item.summary ?? "" });
 
@@ -1218,6 +1224,7 @@ const CLMManager = (() => {
           actions,
           tags,
           folderRow,
+          sourceRow,
         ),
         iconButton("x", "Close details", () => select(null), "clm-details-close"),
       ),
@@ -1233,6 +1240,7 @@ const CLMManager = (() => {
         const full = await CLMData.getCharacter(card.id);
         if (token !== detailToken) return;
         const d = full.data ?? {};
+        renderSourceRow(sourceRow, CLM.sourceLinks(d));
         const sections = [
           ["Description", d.description],
           ["First message", d.first_mes],
@@ -1260,6 +1268,42 @@ const CLMManager = (() => {
         drawers.replaceChildren(h("p.clm-error", { text: `Could not load the full card: ${error.message}` }));
       }
     }, DETAIL_DELAY);
+  }
+
+  /** Links to the page the card was downloaded from, each with a copy button. */
+  function renderSourceRow(row, links) {
+    row.hidden = false;
+    if (!links.length) {
+      row.replaceChildren(icon("link", "clm-icon clm-muted"), h("span.clm-muted", { text: "No download link saved", attrs: { title: "Marinara keeps the link for cards imported through its Bot Browser, and for Chub cards" } }));
+      return;
+    }
+    row.replaceChildren(
+      icon("link", "clm-icon clm-muted"),
+      ...links.map((link) =>
+        h(
+          "span.clm-source",
+          {},
+          h("a.clm-source-link", { text: `Open on ${link.label}`, attrs: { href: link.url, target: "_blank", rel: "noopener noreferrer", title: link.url } }),
+          h("button.clm-btn.clm-icon-btn.clm-source-copy", { attrs: { type: "button", title: `Copy ${link.url}`, "aria-label": `Copy the ${link.label} link` }, on: { click: () => void copyText(link.url) } }, icon("copy")),
+        ),
+      ),
+    );
+  }
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Clipboard API needs a secure context; fall back to a selected textarea.
+      const area = h("textarea", { attrs: { style: "position:fixed;opacity:0" } });
+      area.value = text;
+      document.body.append(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      if (!ok) return CLMEdit.toast(`Could not copy. The link is ${text}`, { error: true, duration: 12000 });
+    }
+    CLMEdit.toast("Link copied.", { duration: 2500 });
   }
 
   const marinaraTokens = (text) =>

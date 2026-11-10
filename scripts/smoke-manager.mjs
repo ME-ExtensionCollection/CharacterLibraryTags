@@ -426,4 +426,30 @@ export default async function ({ withPage, assert, BASE }) {
     assert.equal(await page.isHidden(".clm-selbar"), true);
     await shot("manager-delete");
   });
+
+  await withPage("manager-source-link", async (page, shot) => {
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE });
+    await openManager(page);
+    const open = async (name) => {
+      await page.fill(".clm-search", `"${name}"`);
+      await page.click('.clm-card[data-index="0"]');
+      await page.waitForFunction((n) => document.querySelector(".clm-details-name")?.textContent === n, name);
+      await page.waitForSelector(".clm-details-source:not([hidden])");
+    };
+    await open("Alice");
+    const href = () => page.$$eval(".clm-source-link", (n) => n.map((a) => a.href));
+    assert.deepEqual(await href(), ["https://chub.ai/characters/kestrel/alice-1234"]);
+    assert.equal(await page.getAttribute(".clm-source-link", "target"), "_blank");
+    await page.click(".clm-source-copy");
+    await page.waitForSelector(".clm-toast:has-text('Link copied')");
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "https://chub.ai/characters/kestrel/alice-1234");
+    await shot("source");
+    await open("Alice in Chains");
+    assert.deepEqual(await href(), ["https://chub.ai/characters/q/alice-in-chains"]);
+    await open("Messy Mel");
+    assert.deepEqual(await href(), ["https://example.com/cards/messy-mel"]);
+    await open("Untagged Ursula");
+    assert.deepEqual(await href(), []);
+    assert.match(await page.textContent(".clm-details-source"), /No download link saved/);
+  });
 }

@@ -194,3 +194,20 @@ test("folders: filter, folder: syntax and counts", () => {
   assert.deepEqual(withFolders.folders.map((f) => f.name), ["Fantasy Crew", "Sci-Fi"]);
   assert.equal(CLM.activeFilterCount({ ...CLM.emptyQuery(), folder: "none" }), 1);
 });
+
+test("source links from Bot Browser, Chub and V3 source fields", () => {
+  assert.deepEqual(CLM.sourceLinks({ name: "Alice", extensions: { botBrowserSource: "chub:kestrel/alice-12", chub: { id: "kestrel/alice-12" } } }), [
+    { label: "Chub", url: "https://chub.ai/characters/kestrel/alice-12" },
+  ]);
+  assert.deepEqual(CLM.sourceLinks({ name: "Dark Elf Dana", extensions: { botBrowserSource: "janny:abc-1" } }), [
+    { label: "JannyAI", url: "https://jannyai.com/characters/abc-1_character-dark-elf-dana" },
+  ]);
+  assert.deepEqual(CLM.sourceLinks({ extensions: { chub: { full_path: "someone/bot" } } }), [{ label: "Chub", url: "https://chub.ai/characters/someone/bot" }]);
+  assert.deepEqual(CLM.sourceLinks({ extensions: { wyvern: { id: "w1" } } }), [{ label: "Wyvern", url: "https://app.wyvern.chat/characters/w1" }]);
+  assert.deepEqual(CLM.sourceLinks({ source: ["https://www.example.com/c/1", "javascript:alert(1)", "not a url"], extensions: {} }), [
+    { label: "example.com", url: "https://www.example.com/c/1" },
+  ]);
+  // Unknown sites and empty cards give nothing.
+  assert.deepEqual(CLM.sourceLinks({ extensions: { botBrowserSource: "plotlight:x" } }), []);
+  assert.deepEqual(CLM.sourceLinks({}), []);
+});
