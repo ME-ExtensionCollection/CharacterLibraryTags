@@ -371,7 +371,15 @@ export default async function ({ withPage, assert, BASE }) {
     const summary = await (await fetch(`${BASE}/api/characters/catalog?view=summary`)).json();
     assert.deepEqual(summary.items.filter((i) => i.tags.includes("Picked")).map((i) => i.id).sort(), [...picked].sort());
 
-    // Esc clears the selection; a plain click selects one character again.
+    // While some are selected, a plain click anywhere on a card adds or removes it.
+    await page.click('.clm-card[data-index="6"] .clm-card-name');
+    assert.match(await page.textContent(".clm-selbar-count"), /^6 selected/);
+    assert.equal(await page.isVisible('.clm-card--checked[data-index="6"]'), true);
+    await page.click('.clm-card[data-index="6"]', { position: { x: 4, y: 4 } });
+    assert.match(await page.textContent(".clm-selbar-count"), /^5 selected/);
+    // Esc clears the selection; then a plain click shows one character again.
+    await page.keyboard.press("Escape");
+    assert.equal(await page.isHidden(".clm-selbar"), true);
     await page.click('.clm-card[data-index="1"]');
     assert.equal(await page.isHidden(".clm-selbar"), true);
     // Details pane: folder chip × removes it from the folder.

@@ -934,7 +934,11 @@ const CLMManager = (() => {
     node.setAttribute("aria-selected", String(card.id === S.selectedId));
   }
 
-  /** Click: show one character. Ctrl/Cmd-click or the checkbox: add to the selection. Shift-click: select a range. */
+  /**
+   * Click: show one character. Ctrl/Cmd-click or the checkbox: add to the selection.
+   * Shift-click: select a range. While some are selected, a plain click anywhere on a
+   * card adds or removes it too; Esc or Clear ends the selection.
+   */
   function onGridClick(event) {
     const node = event.target.closest(".clm-card");
     if (!node) return;
@@ -942,12 +946,13 @@ const CLMManager = (() => {
     if (event.shiftKey) {
       event.preventDefault();
       selectRange(S.anchorId ?? S.selectedId ?? id, id);
-    } else if (event.ctrlKey || event.metaKey || event.target.closest(".clm-card-check")) {
+    } else if (event.ctrlKey || event.metaKey || S.multi.size || event.target.closest(".clm-card-check")) {
       if (!S.multi.size && S.selectedId && S.selectedId !== id) S.multi.add(S.selectedId);
       toggleMulti(id);
       S.anchorId = id;
+      // Show the card just added in the details pane.
+      if (S.multi.has(id) && S.selectedId !== id) select(id);
     } else {
-      if (S.multi.size) clearMulti();
       S.anchorId = id;
       select(id);
     }
