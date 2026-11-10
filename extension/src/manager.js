@@ -255,7 +255,7 @@ const CLMManager = (() => {
       if (preset.sort in CLM.SORTS) S.sort = preset.sort;
       for (const [key, label] of Object.entries(preset.labels ?? {})) S.labels.set(key, label);
       ui.searchInput.value = S.query.text;
-      update({ resetScroll: true });
+      update();
     } else if (action === "save") {
       const name = window.prompt("Name for this search:", "")?.trim();
       if (!name) return update();
@@ -531,7 +531,7 @@ const CLMManager = (() => {
           change: (e) => {
             S.sort = e.target.value;
             savePrefs();
-            update({ resetScroll: true });
+            update();
           },
         },
       },
@@ -539,7 +539,7 @@ const CLMManager = (() => {
     );
     const reshuffle = iconButton("shuffle", "Shuffle again", () => {
       S.seed = (S.seed * 48271 + 1) % 2147483647;
-      update({ resetScroll: true });
+      update();
     });
     const scopeSelect = h(
       "select.clm-select.clm-scope",
@@ -648,7 +648,7 @@ const CLMManager = (() => {
       on: {
         change: (e) => {
           S.query.folder = e.target.value || null;
-          update({ resetScroll: true });
+          update();
         },
       },
     });
@@ -1075,7 +1075,7 @@ const CLMManager = (() => {
         on: {
           click: () => {
             S.query.folder = S.query.folder === id ? null : id;
-            update({ resetScroll: true });
+            update();
           },
         },
       },
@@ -1213,7 +1213,7 @@ const CLMManager = (() => {
             click: () => {
               ui.searchInput.value = CLM.quoteToken("creator:", card.creator);
               S.query.text = ui.searchInput.value;
-              update({ resetScroll: true });
+              update();
             },
           },
         })
@@ -1391,6 +1391,10 @@ const CLMManager = (() => {
   }
 
   let lastScrollKey = "";
+  // Where you were in each recent view (query + sort), so clearing a filter puts
+  // you back where you left the full list. Card ids, not pixels: survives deletes.
+  const VIEW_MEMORY = 10;
+  const viewAnchors = new Map(); // scrollKey -> grid anchor, oldest first
 
   function compute() {
     if (S.indexedItems !== CLMData.items || S.indexedFolders !== CLMData.folders) rebuildIndex();
@@ -1400,9 +1404,8 @@ const CLMManager = (() => {
     S.facets = CLM.facetCounts(S.results);
   }
 
-  function update({ resetScroll = false } = {}) {
+  function update() {
     if (!S.built) return;
-    if (resetScroll) lastScrollKey = "";
     if (!renderFrame) renderFrame = requestAnimationFrame(render);
   }
 
@@ -1459,9 +1462,17 @@ const CLMManager = (() => {
 
     // Grid
     const scrollKey = JSON.stringify([q, S.sort, S.seed]);
-    const keepScroll = scrollKey === lastScrollKey;
+    const sameView = scrollKey === lastScrollKey;
+    const here = ui.grid.anchor();
+    if (!sameView && lastScrollKey) {
+      viewAnchors.delete(lastScrollKey);
+      if (here) viewAnchors.set(lastScrollKey, here);
+      while (viewAnchors.size > VIEW_MEMORY) viewAnchors.delete(viewAnchors.keys().next().value);
+    }
     lastScrollKey = scrollKey;
-    ui.grid.setItems(S.results, { keepScroll });
+    // Same view: hold the top card (deletes above it do not shift you). New view:
+    // back to where you left it, or the top.
+    ui.grid.setItems(S.results, { keepScroll: sameView, anchor: sameView ? here : viewAnchors.get(scrollKey) });
     ui.empty.hidden = S.results.length > 0 || (S.loading && !total);
     if (!ui.empty.hidden) {
       ui.empty.textContent = total ? "No characters match these filters." : S.loadError || "Your library is empty.";
@@ -1533,7 +1544,7 @@ const CLMManager = (() => {
     S.query = { ...CLM.emptyQuery(), scope };
     S.labels.clear();
     ui.searchInput.value = "";
-    update({ resetScroll: true });
+    update();
   }
 
   // ── Open / close ──

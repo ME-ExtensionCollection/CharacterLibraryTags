@@ -151,8 +151,10 @@ const CLMVirtualGrid = (() => {
     resizeObserver.observe(viewport);
 
     return {
-      setItems(next, { keepScroll = true } = {}) {
+      /** keepScroll: false jumps to the top; an `anchor` (from anchor()) scrolls back to it instead. */
+      setItems(next, { keepScroll = true, anchor = null } = {}) {
         items = next;
+        if (anchor && this.restoreAnchor(anchor)) return;
         if (!keepScroll) viewport.scrollTop = 0;
         render();
       },
@@ -175,6 +177,38 @@ const CLMVirtualGrid = (() => {
           viewport.scrollTop = top + rowHeight - viewport.clientHeight;
         }
         render();
+      },
+      /**
+       * Where the view is, as card ids rather than pixels so it survives deletes:
+       * the first card of the top row in view, the `count` cards after it, and
+       * how far that row sits from the top of the viewport.
+       */
+      anchor(count = 20) {
+        if (!items.length || rowHeight <= 0) return null;
+        const row = Math.max(0, Math.floor((viewport.scrollTop - options.gap) / rowHeight));
+        const index = Math.min(items.length - 1, row * columns);
+        if (index === 0 && viewport.scrollTop <= options.gap) return null; // at the top: nothing to remember
+        const ids = items.slice(index, index + count + 1).map((c) => c.id);
+        return { ids, offset: rowTop(index, columns, rowHeight) - viewport.scrollTop };
+      },
+      /** Scroll back to an anchor(): its first card still in the list. False if none survived. */
+      restoreAnchor(anchor) {
+        if (!anchor) return false;
+        const wanted = new Map(anchor.ids.map((id, rank) => [id, rank]));
+        let best = -1;
+        let bestRank = Infinity;
+        for (let i = 0; i < items.length && bestRank > 0; i += 1) {
+          const rank = wanted.get(items[i].id);
+          if (rank !== undefined && rank < bestRank) {
+            best = i;
+            bestRank = rank;
+          }
+        }
+        if (best < 0) return false;
+        layout();
+        viewport.scrollTop = rowTop(best, columns, rowHeight) - anchor.offset;
+        render();
+        return true;
       },
       nodeFor: (id) => nodes.get(id) ?? null,
       destroy() {

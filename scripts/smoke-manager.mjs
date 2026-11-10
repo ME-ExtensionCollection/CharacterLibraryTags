@@ -591,4 +591,65 @@ export default async function ({ withPage, assert, BASE }) {
     await page.waitForTimeout(400);
     assert.ok(Math.abs((await top(id)) - opened) <= 1, `card moved on close from ${opened} to ${await top(id)}`);
   });
+
+  await withPage("manager-clear-keeps-place", async (page, shot) => {
+    await openManager(page);
+    // The first card of the top row in view, and how far that row is from the grid's top.
+    const topCard = () =>
+      page.$eval(".clm-grid", (grid) => {
+        const view = grid.getBoundingClientRect();
+        const cards = [...grid.querySelectorAll(".clm-card")].filter((c) => c.getBoundingClientRect().bottom > view.top + 10);
+        const card = cards.reduce((a, b) => (Number(b.dataset.index) < Number(a.dataset.index) ? b : a));
+        return { id: card.dataset.id, index: Number(card.dataset.index), offset: Math.round(card.getBoundingClientRect().top - view.top) };
+      });
+    await page.$eval(".clm-grid", (n) => (n.scrollTop = n.scrollHeight / 3));
+    await page.waitForTimeout(200);
+    const start = await topCard();
+    assert.ok(start.index > 100);
+
+    // Filter: back to the top of the (short) filtered list.
+    await page.fill(".clm-search", "kestrel");
+    await waitCount(page, expectCount({ text: "kestrel" }));
+    assert.equal((await topCard()).index, 0);
+    // Clear: back to the same card at the same height.
+    await page.click(".clm-clear");
+    await waitCount(page, 3005);
+    await page.waitForTimeout(100);
+    assert.deepEqual(await topCard(), start);
+
+    // Filter by the top card's creator, delete every match (the top card too), clear:
+    // you land on the first surviving card after it.
+    const lineup = await page.$$eval(".clm-card", (cards) => cards.map((c) => [Number(c.dataset.index), c.dataset.id]).sort((a, b) => a[0] - b[0]).map((x) => x[1]));
+    // Element click (no scrolling into view): the top card may be partly above the fold.
+    await page.$eval(`.clm-card[data-id="${start.id}"]`, (n) => n.click());
+    await page.click("button[title='Show everything by this creator']");
+    await page.waitForFunction(() => !document.querySelector(".clm-count")?.textContent.startsWith("3,005 "));
+    // Narrow to a handful (same creator, same first name word) so every match is on screen.
+    const word = (await page.textContent(".clm-details-name")).split(/\s+/)[0];
+    await page.fill(".clm-search", `${await page.inputValue(".clm-search")} ${word}`);
+    await page.waitForFunction(() => /^\d{1,2} of /.test(document.querySelector(".clm-count")?.textContent ?? ""));
+    await page.focus(".clm-grid");
+    await page.keyboard.press("Control+a");
+    const doomed = await page.$$eval(".clm-card--checked", (n) => n.map((x) => x.dataset.id));
+    assert.ok(doomed.includes(start.id));
+    await page.click(".clm-selbar .clm-btn--danger");
+    await page.waitForSelector(".clm-dialog");
+    if (await page.$(".clm-dialog-typed")) await page.fill(".clm-dialog-typed", String(doomed.length));
+    await page.click(".clm-dialog-confirm");
+    await page.waitForSelector(".clm-toast:has-text('Deleted')");
+    await page.click(".clm-clear");
+    const left = 3005 - doomed.length;
+    await waitCount(page, left, left);
+    await page.waitForTimeout(100);
+    const survivor = lineup.slice(lineup.indexOf(start.id)).find((id) => !doomed.includes(id));
+    await shot("after");
+    // The details pane closing (its card was deleted) reflows the columns too, so
+    // demand "on screen", not the exact row.
+    const onScreen = await page.$eval(`.clm-card[data-id="${survivor}"]`, (n) => {
+      const view = n.closest(".clm-grid").getBoundingClientRect();
+      const r = n.getBoundingClientRect();
+      return r.bottom > view.top && r.top < view.bottom;
+    }).catch(() => false);
+    assert.ok(onScreen, `${survivor} (next after the deleted top card) not on screen`);
+  });
 }
