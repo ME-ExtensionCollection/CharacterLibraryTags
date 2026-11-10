@@ -265,7 +265,8 @@ const CLMEdit = (() => {
 
   // ── Delete ──
 
-  let deleting = false;
+  /** The delete run in progress: more cards can join it. */
+  let activeDelete = null; // { add(cards) -> boolean, has(id) }
 
   /**
    * A confirm dialog drawn inside the manager window. Resolves true on confirm,
@@ -364,11 +365,14 @@ const CLMEdit = (() => {
    * with a progress notice and a Stop button.
    */
   async function deleteCards(cards, { confirmed = false } = {}) {
-    if (deleting) return toast("A delete is already running.");
     const { h, icon } = CLMManager;
     const protectedCards = cards.filter((c) => CLMData.isProtected(c.id));
-    const targets = cards.filter((c) => !CLMData.isProtected(c.id));
-    if (!targets.length) return toast(`${names(protectedCards)} is built into Marinara and cannot be deleted.`);
+    const queuedAlready = cards.filter((c) => activeDelete?.has(c.id));
+    const targets = cards.filter((c) => !CLMData.isProtected(c.id) && !activeDelete?.has(c.id));
+    if (!targets.length) {
+      if (queuedAlready.length) return toast(queuedAlready.length === 1 ? "That character is already being deleted." : "Those characters are already being deleted.");
+      return toast(`${names(protectedCards)} is built into Marinara and cannot be deleted.`);
+    }
     const n = targets.length;
     const ok = confirmed || await confirmDialog({
       title: n === 1 ? `Delete “${targets[0].name}”?` : `Delete ${n.toLocaleString()} characters?`,
@@ -389,11 +393,19 @@ const CLMEdit = (() => {
           ),
         ),
         protectedCards.length ? h("p.clm-muted", { text: `${names(protectedCards)} is built in and will be skipped.` }) : null,
+        queuedAlready.length ? h("p.clm-muted", { text: `${queuedAlready.length.toLocaleString()} other selected character${queuedAlready.length === 1 ? " is" : "s are"} already being deleted.` }) : null,
+        activeDelete ? h("p.clm-muted", { text: "A delete is running; these join it." }) : null,
       ],
     });
     if (!ok) return;
+    // A run is going: join it (the confirm may have outlasted it, then start anew).
+    if (activeDelete?.add(targets.filter((c) => !activeDelete.has(c.id)))) return;
+    await runDelete(targets);
+  }
 
-    deleting = true;
+  async function runDelete(initial) {
+    const targets = new Map(initial.map((c) => [c.id, c]));
+    let n = targets.size;
     let stop = false;
     const notice = toast(`Deleting 0 of ${n.toLocaleString()}…`, {
       duration: 24 * 60 * 60 * 1000,
@@ -425,8 +437,8 @@ const CLMEdit = (() => {
     };
     tick();
     try {
-      const result = await CLMData.deleteCharacters(
-        targets.map((c) => c.id),
+      const run = CLMData.startDelete(
+        [...targets.keys()],
         {
           shouldStop: () => stop,
           onProgress: (count) => {
@@ -444,12 +456,26 @@ const CLMEdit = (() => {
           },
         },
       );
+      activeDelete = {
+        has: (id) => targets.has(id),
+        add(cards) {
+          if (stop || !run.add(cards.map((c) => c.id))) return false;
+          for (const c of cards) targets.set(c.id, c);
+          n = targets.size;
+          status = `added ${cards.length.toLocaleString()}`;
+          paint();
+          return true;
+        },
+      };
+      const result = await run.done;
+      activeDelete = null;
       ticking = false;
       notice.remove();
       const deleted = result.deletedIds.length;
-      const parts = [`Deleted ${deleted === 1 && n === 1 ? `“${targets[0].name}”` : `${deleted.toLocaleString()} character${deleted === 1 ? "" : "s"}`} in ${clock()}.`];
+      const first = targets.values().next().value;
+      const parts = [`Deleted ${deleted === 1 && n === 1 ? `“${first.name}”` : `${deleted.toLocaleString()} character${deleted === 1 ? "" : "s"}`} in ${clock()}.`];
       if (stop && deleted + result.failed.length < n) parts.push(`Stopped; ${(n - deleted - result.failed.length).toLocaleString()} not deleted.`);
-      const failedCards = result.failed.map(({ id }) => targets.find((c) => c.id === id)).filter(Boolean);
+      const failedCards = result.failed.map(({ id }) => targets.get(id)).filter(Boolean);
       if (result.failed.length) {
         parts.push(`${result.failed.length.toLocaleString()} failed: ${result.failed[0].error.message}`);
         for (const { id, error } of result.failed) marinara.log.error(`Could not delete ${id}`, error);
@@ -466,7 +492,7 @@ const CLMEdit = (() => {
       fail("Delete failed", error);
     } finally {
       ticking = false;
-      deleting = false;
+      activeDelete = null;
     }
   }
 

@@ -493,6 +493,38 @@ export default async function ({ withPage, assert, BASE }) {
     assert.equal(stats.deletes, 10);
   }, { allowErrors: /status of 429/ });
 
+  await withPage("manager-delete-append", async (page, shot) => {
+    // A second delete while one runs joins it: one notice, one total, all gone.
+    const exists = async (id) => (await fetch(`${BASE}/api/characters/${id}`)).status === 200;
+    await openManager(page);
+    await page.click('.clm-card[data-index="0"]');
+    await page.click('.clm-card[data-index="11"]', { modifiers: ["Shift"] });
+    const first = await page.$$eval(".clm-card--checked", (n) => n.map((x) => x.dataset.id));
+    await page.click(".clm-selbar .clm-btn--danger");
+    await page.fill(".clm-dialog-typed", "12");
+    await page.click(".clm-dialog-confirm");
+    await page.waitForSelector(".clm-toast:has-text('Deleting')");
+    await page.focus(".clm-grid");
+    await page.keyboard.press("Escape"); // clear the selection
+    await page.waitForSelector(".clm-selbar", { state: "hidden" });
+    const more = await page.$$eval(".clm-card", (cards) =>
+      cards.filter((c) => Number(c.dataset.index) >= 20 && Number(c.dataset.index) < 23).map((c) => c.dataset.id));
+    const click = (id, init = {}) => page.$eval(`.clm-card[data-id="${id}"]`, (n, init) => n.dispatchEvent(new MouseEvent("click", { bubbles: true, ...init })), init);
+    await click(more[0]);
+    await click(more[2], { shiftKey: true });
+    assert.match(await page.textContent(".clm-selbar-count"), /^3 selected/);
+    await page.click(".clm-selbar .clm-btn--danger");
+    await page.waitForSelector(".clm-dialog:has-text('these join it')");
+    await shot("join");
+    await page.click(".clm-dialog-confirm");
+    await page.waitForSelector(".clm-toast:has-text('of 15')");
+    await page.waitForSelector(".clm-toast:has-text('Deleted 15 characters')", { timeout: 20000 });
+    for (const id of [...first, ...more]) assert.equal(await exists(id), false, id);
+    await waitCount(page, 2990, 2990);
+    const stats = await (await fetch(`${BASE}/__mock/stats`)).json();
+    assert.equal(stats.deletes, 15);
+  });
+
   await withPage("manager-source-link", async (page, shot) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: BASE });
     await openManager(page);

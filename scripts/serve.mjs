@@ -48,7 +48,13 @@ function sendJson(res, status, body) {
   res.end(status === 204 ? undefined : JSON.stringify(body));
 }
 
-createServer(async (req, res) => {
+// A test that fails mid-run closes its page with requests in flight; keep serving.
+createServer((req, res) => handle(req, res).catch((error) => {
+  if (error.code !== "ECONNRESET") console.error(error);
+  if (!res.headersSent && !res.destroyed) sendJson(res, 500, { error: String(error) });
+})).listen(PORT, "127.0.0.1", () => console.log(`Harness: http://localhost:${PORT}/dev/harness.html (${COUNT} mock cards)`));
+
+async function handle(req, res) {
   const url = new URL(req.url, "http://localhost");
   if (url.pathname === "/") {
     res.writeHead(302, { Location: "/dev/harness.html" });
@@ -107,4 +113,4 @@ createServer(async (req, res) => {
     res.writeHead(404);
     res.end("Not found");
   }
-}).listen(PORT, "127.0.0.1", () => console.log(`Harness: http://localhost:${PORT}/dev/harness.html (${COUNT} mock cards)`));
+}

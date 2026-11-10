@@ -300,23 +300,38 @@ const CLMData = (() => {
   const sleep = (ms) => new Promise((resolve) => marinara.setTimeout(resolve, ms));
 
   /**
-   * Permanently delete characters. `onProgress(done, total)` runs after each one;
-   * `shouldStop()` returning true stops starting new ones. A "too many requests"
-   * answer pauses every worker for the time the server asks, then retries. A
-   * dropped connection or a server error (5xx) is retried a few times; if the
-   * first try did delete the card, the retry's 404 counts as done.
+   * Permanently delete characters. Returns `{ add, done }`: `add(ids)` queues
+   * more while the run is going (false once it has finished, so start a new
+   * one), and `done` resolves with `{ deletedIds, failed, skippedIds }`.
+   * `onProgress(done, total)` runs after each one; `shouldStop()` returning
+   * true stops starting new ones. A "too many requests" answer pauses every
+   * worker for the time the server asks, then retries. A dropped connection or
+   * a server error (5xx) is retried a few times; if the first try did delete
+   * the card, the retry's 404 counts as done. Deleted cards leave the cached
+   * library as they go (listeners hear about it about once a second).
    */
-  async function deleteCharacters(ids, { onProgress = () => {}, shouldStop = () => false, onWait = () => {}, onRetry = () => {} } = {}) {
+  function startDelete(ids, { onProgress = () => {}, shouldStop = () => false, onWait = () => {}, onRetry = () => {} } = {}) {
     const result = { deletedIds: [], failed: [], skippedIds: [] };
-    const todo = ids.filter((id) => {
-      if (!PROTECTED_IDS.has(id)) return true;
-      result.skippedIds.push(id);
-      return false;
-    });
+    const todo = [];
+    const queued = new Set();
     let next = 0;
     let nextStartAt = 0; // pacing: earliest time the next request may start
     let pausedUntil = 0; // set by a 429
+    let workers = 0;
+    let finished = false;
+    let finish;
+    const done = new Promise((resolve) => (finish = resolve));
     const gap = 1000 / DELETE_PER_SECOND;
+
+    // Deleted cards leave the cache at once (so nothing asks the server for
+    // them again); listeners hear about it at most once a second.
+    let emitTimer = 0;
+    const dropLocal = (id) => {
+      items = items.filter((item) => item.id !== id);
+      folders = folders.map((f) => (f.characterIds.includes(id) ? { ...f, characterIds: f.characterIds.filter((x) => x !== id) } : f));
+      if (!emitTimer) emitTimer = marinara.setTimeout(() => ((emitTimer = 0), emit()), 1000);
+    };
+
     const deleteOne = async (id) => {
       let transient = 0;
       for (let attempt = 0; ; attempt += 1) {
@@ -344,28 +359,53 @@ const CLMData = (() => {
       }
     };
     const worker = async () => {
-      while (next < todo.length && !shouldStop()) {
-        const id = todo[next++];
-        try {
-          await deleteOne(id);
-          result.deletedIds.push(id);
-        } catch (error) {
-          result.failed.push({ id, error });
+      workers += 1;
+      try {
+        while (next < todo.length && !shouldStop()) {
+          const id = todo[next++];
+          try {
+            await deleteOne(id);
+            result.deletedIds.push(id);
+            dropLocal(id);
+          } catch (error) {
+            result.failed.push({ id, error });
+          }
+          onProgress(result.deletedIds.length + result.failed.length, todo.length);
         }
-        onProgress(result.deletedIds.length + result.failed.length, todo.length);
+      } finally {
+        workers -= 1;
       }
+      if (workers === 0 && !finished) await wrapUp();
     };
-    await Promise.all(Array.from({ length: Math.min(DELETE_PARALLEL, todo.length) }, worker));
-    if (result.deletedIds.length) {
-      const gone = new Set(result.deletedIds);
-      items = items.filter((item) => !gone.has(item.id));
-      folders = folders.map((f) => (f.characterIds.some((id) => gone.has(id)) ? { ...f, characterIds: f.characterIds.filter((id) => !gone.has(id)) } : f));
-      await syncGeneration();
-      afterWrite();
-      emit();
-    }
-    return result;
+    const wrapUp = async () => {
+      finished = true;
+      if (emitTimer) marinara.clearTimeout(emitTimer);
+      emitTimer = 0;
+      if (result.deletedIds.length) {
+        await syncGeneration();
+        afterWrite();
+        emit();
+      }
+      finish(result);
+    };
+    const add = (more) => {
+      if (finished) return false;
+      for (const id of more) {
+        if (queued.has(id)) continue;
+        queued.add(id);
+        if (PROTECTED_IDS.has(id)) result.skippedIds.push(id);
+        else todo.push(id);
+      }
+      // A new worker claims its first id synchronously, so `next` moves before the loop re-checks.
+      while (workers < DELETE_PARALLEL && next < todo.length && !shouldStop()) void worker();
+      return true;
+    };
+    add(ids);
+    if (workers === 0) void wrapUp();
+    return { add, done, get total() { return todo.length; } };
   }
+
+  const deleteCharacters = (ids, options) => startDelete(ids, options).done;
 
   /** After our own write, adopt the new generation so revalidate() does not reload everything. */
   async function syncGeneration() {
@@ -433,6 +473,7 @@ const CLMData = (() => {
     editTags,
     setFavorite,
     deleteCharacters,
+    startDelete,
     isProtected: (id) => PROTECTED_IDS.has(id),
     tagMerger,
     tagExpansion,
