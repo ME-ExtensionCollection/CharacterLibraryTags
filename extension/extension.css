@@ -291,6 +291,15 @@
   outline-offset: 1px;
 }
 
+.clm-btn--danger {
+  color: var(--destructive, #ff6b6b);
+}
+
+.clm-btn--danger:hover:not(:disabled) {
+  border-color: var(--destructive, #ff6b6b);
+  background: color-mix(in srgb, var(--destructive, #ff6b6b) 15%, transparent);
+}
+
 .clm-icon-btn {
   width: 2rem;
   padding: 0;

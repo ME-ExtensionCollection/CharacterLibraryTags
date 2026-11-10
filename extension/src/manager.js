@@ -54,6 +54,7 @@ const CLMManager = (() => {
     plus: [["path", { d: "M5 12h14M12 5v14" }]],
     folder: [["path", { d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" }]],
     check: [["path", { d: "M20 6 9 17l-5-5" }]],
+    trash: [["path", { d: "M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M10 11v6M14 11v6" }]],
     bookmark: [["path", { d: "m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z" }]],
   };
 
@@ -1055,6 +1056,13 @@ const CLMManager = (() => {
       h("button.clm-btn", { text: "Remove", attrs: { type: "button" }, on: { click: () => runTag("remove") } }),
       h("span.clm-selbar-sep"),
       folderSlot,
+      h("span.clm-selbar-sep"),
+      h(
+        "button.clm-btn.clm-btn--danger",
+        { attrs: { type: "button", title: "Permanently delete the selected characters (asks first)" }, on: { click: () => void CLMEdit.deleteCards(selectedCards()) } },
+        icon("trash"),
+        " Delete",
+      ),
     );
     let lastSignature = "";
     return {
@@ -1183,6 +1191,7 @@ const CLMManager = (() => {
       CLMEdit.favoriteButton(card),
       h("button.clm-btn", { attrs: { type: "button", title: "Open Marinara's character editor" }, on: { click: () => void CLMBridge.edit(item) } }, icon("pencil"), " Edit"),
       h("button.clm-btn", { attrs: { type: "button", title: "Start a chat with this character" }, on: { click: () => void CLMBridge.chat(item) } }, icon("chat"), " Chat"),
+      CLMData.isProtected(card.id) ? null : CLMEdit.deleteButton([card]),
     );
 
     const drawers = h("div.clm-drawers");
@@ -1364,6 +1373,7 @@ const CLMManager = (() => {
       ui.empty.textContent = total ? "No characters match these filters." : S.loadError || "Your library is empty.";
     }
     if (S.selectedId && !S.index.byId.has(S.selectedId)) S.selectedId = null;
+    for (const id of S.multi) if (!S.index.byId.has(id)) S.multi.delete(id);
     if (S.detailsDirty) {
       S.detailsDirty = false;
       if (S.selectedId) renderDetails();

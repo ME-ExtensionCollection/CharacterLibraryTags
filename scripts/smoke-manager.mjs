@@ -380,4 +380,50 @@ export default async function ({ withPage, assert, BASE }) {
     await page.click(".clm-details-folders .clm-chip--folder:has-text('Smoke folder') .clm-chip-remove");
     await page.waitForFunction(() => document.querySelector(".clm-folder-filter").textContent.includes("Smoke folder (4)"));
   });
+
+  await withPage("manager-delete", async (page, shot) => {
+    const answers = [];
+    const seen = [];
+    page.on("dialog", (dialog) => {
+      seen.push({ type: dialog.type(), message: dialog.message() });
+      const answer = answers.shift();
+      if (answer === false) return dialog.dismiss();
+      return dialog.type() === "prompt" ? dialog.accept(String(answer ?? "")) : dialog.accept();
+    });
+    const exists = async (id) => (await fetch(`${BASE}/api/characters/${id}`)).status === 200;
+    await openManager(page);
+
+    // One character from the details pane: cancel keeps it, OK deletes it.
+    await page.click('.clm-card[data-index="0"]');
+    const first = await page.getAttribute('.clm-card[data-index="0"]', "data-id");
+    answers.push(false);
+    await page.click(".clm-details-actions .clm-btn--danger");
+    assert.equal(await exists(first), true);
+    assert.match(seen[0].message, /Permanently delete “/);
+    answers.push(true);
+    await page.click(".clm-details-actions .clm-btn--danger");
+    await page.waitForSelector(".clm-toast:has-text('Deleted “')");
+    assert.equal(await exists(first), false);
+    await waitCount(page, 3004, 3004);
+    assert.equal(await page.isHidden(".clm-details"), true);
+
+    // Twelve selected: wrong typed number deletes nothing, the right one deletes all.
+    await page.click('.clm-card[data-index="0"]');
+    await page.click('.clm-card[data-index="11"]', { modifiers: ["Shift"] });
+    assert.match(await page.textContent(".clm-selbar-count"), /^12 selected/);
+    const picked = await page.$$eval(".clm-card--checked", (n) => n.map((x) => x.dataset.id));
+    answers.push(true, "11");
+    await page.click(".clm-selbar .clm-btn--danger");
+    await page.waitForSelector(".clm-toast:has-text('did not match')");
+    assert.equal(seen.at(-1).type, "prompt");
+    assert.match(seen.at(-2).message, /these 12 characters/);
+    for (const id of picked) assert.equal(await exists(id), true);
+    answers.push(true, "12");
+    await page.click(".clm-selbar .clm-btn--danger");
+    await page.waitForSelector(".clm-toast:has-text('Deleted 12 characters')");
+    for (const id of picked) assert.equal(await exists(id), false);
+    await waitCount(page, 2992, 2992);
+    assert.equal(await page.isHidden(".clm-selbar"), true);
+    await shot("manager-delete");
+  });
 }

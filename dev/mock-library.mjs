@@ -354,9 +354,10 @@ export function createMockApi(options) {
       if (method === "PATCH") return patch(id, body);
       if (method === "DELETE") {
         if (!row) return [404, { error: "Character not found" }];
+        if (id === "__professor_mari__") return [403, { error: "Professor Mari is a built-in character and cannot be deleted" }];
         rows = rows.filter((r) => r !== row);
         bump();
-        return [200, { success: true }];
+        return [204, null];
       }
     }
     return null;

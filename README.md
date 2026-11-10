@@ -34,6 +34,7 @@ Open it by **right-clicking the Characters button in the top bar** or **the Open
 - Add a tag with the *+ tag* field and remove one with its ×. Both offer Undo.
 - **Selecting several characters**: Ctrl-click (Cmd on Mac) or the checkbox on a card adds it to the selection, Shift-click selects a range, and Ctrl+A in the grid selects every result. A bar then lets you add or remove a tag on just the selection, add it to a folder, take it out of one, or make a new folder from it. Esc clears the selection.
 - **Folders in the details pane**: the character's folders are listed under its tags. Click one to show that folder, use × to take the character out, or *+ folder* to add it to one.
+- **Deleting**: *Delete* in the details pane or in the selection bar deletes characters permanently. Marinara has no trash and this cannot be undone. A confirm lists the characters first, and for 10 or more you also type how many. Characters are deleted one at a time with a progress notice; *Stop* ends the run after the current one. Marinara also takes the characters out of their chats and deletes their gallery images; the chats themselves stay. Professor Mari is built in and is skipped.
 - **All results** (under More filters) adds or removes one tag on every character in the current results, after a confirmation. Marinara saves a version of each card before its tags change.
 
 ## Tag filters in the full library
@@ -69,6 +70,7 @@ Type in either field to get tag suggestions with character counts. Add a tag by 
 - Each time the manager opens, `catalogGeneration` is checked and the library is reloaded only if it changed. The refresh button forces a check.
 - *All card text* sends one `catalog?view=summary&search=…` request per word and intersects the results with the local filters.
 - Tag edits use `POST /api/characters/bulk-tags` and favorites use `PATCH /api/characters/:id`, the same endpoints Marinara uses.
+- Deleting uses `DELETE /api/characters/:id`, one request at a time.
 - Folders come from `GET /api/characters/groups/list` each time the manager opens, because folder changes don't change `catalogGeneration`. Adding or removing characters reads the folder first and then sends its full member list with `PATCH /api/characters/groups/:id`, since that call replaces the list.
 - Edit and Chat call Marinara's own UI actions (`openCharacterDetail` and `openModal("start-character-chat")`). Marinara does not publish these to page code, so the extension finds its UI store in React's component tree, where zustand keeps a reference to it. Marinara's query client is found the same way and refreshes Marinara's character lists after an edit. If neither can be found, the extension opens the stock library, searches for the character, and clicks its Edit or Chat now button.
 

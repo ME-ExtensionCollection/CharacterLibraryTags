@@ -14,6 +14,7 @@
 //   GET  /api/characters/groups/:id                     one folder (read before changing it)
 //   POST /api/characters/groups                         { name, characterIds }
 //   PATCH /api/characters/groups/:id                    { characterIds } replaces the member list
+//   DELETE /api/characters/:id                          permanent: no trash, no undo (204)
 
 const CLMData = (() => {
   "use strict";
@@ -279,6 +280,43 @@ const CLMData = (() => {
     emit();
   }
 
+  /** Marinara refuses to delete its built-in guide character. */
+  const PROTECTED_IDS = new Set(["__professor_mari__"]);
+
+  /**
+   * Permanently delete characters, one request at a time (Marinara's delete also
+   * cleans up chats, lorebook links and gallery files, so it is not cheap).
+   * `onProgress(done, total)` runs after each one; `shouldStop()` returning true
+   * stops before the next request.
+   */
+  async function deleteCharacters(ids, { onProgress = () => {}, shouldStop = () => false } = {}) {
+    const result = { deletedIds: [], failed: [], skippedIds: [] };
+    const todo = ids.filter((id) => {
+      if (!PROTECTED_IDS.has(id)) return true;
+      result.skippedIds.push(id);
+      return false;
+    });
+    for (const id of todo) {
+      if (shouldStop()) break;
+      try {
+        await request(`/api/characters/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "x-marinara-csrf": "1" } });
+        result.deletedIds.push(id);
+      } catch (error) {
+        result.failed.push({ id, error });
+      }
+      onProgress(result.deletedIds.length + result.failed.length, todo.length);
+    }
+    if (result.deletedIds.length) {
+      const gone = new Set(result.deletedIds);
+      items = items.filter((item) => !gone.has(item.id));
+      folders = folders.map((f) => (f.characterIds.some((id) => gone.has(id)) ? { ...f, characterIds: f.characterIds.filter((id) => !gone.has(id)) } : f));
+      await syncGeneration();
+      afterWrite();
+      emit();
+    }
+    return result;
+  }
+
   /** After our own write, adopt the new generation so revalidate() does not reload everything. */
   async function syncGeneration() {
     try {
@@ -344,6 +382,8 @@ const CLMData = (() => {
     createFolder,
     editTags,
     setFavorite,
+    deleteCharacters,
+    isProtected: (id) => PROTECTED_IDS.has(id),
     tagMerger,
     tagExpansion,
     canonicalKeys,

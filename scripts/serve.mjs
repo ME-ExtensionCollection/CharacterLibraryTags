@@ -41,7 +41,7 @@ async function readBody(req) {
 
 function sendJson(res, status, body) {
   res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
-  res.end(JSON.stringify(body));
+  res.end(status === 204 ? undefined : JSON.stringify(body));
 }
 
 createServer(async (req, res) => {

@@ -30,8 +30,8 @@ const CLMEdit = (() => {
       button.className = "clm-btn clm-toast-action";
       button.textContent = action.label;
       button.addEventListener("click", () => {
-        node.remove();
-        action.run();
+        if (!action.keep) node.remove();
+        action.run(button);
       });
       node.append(button);
     }
@@ -263,10 +263,93 @@ const CLMEdit = (() => {
     return button;
   }
 
+  // ── Delete ──
+
+  let deleting = false;
+
+  /**
+   * Permanently delete `cards` after asking. One character: one confirm naming it.
+   * Several: a confirm listing them, and from 10 up the count must be typed too.
+   * Runs one request at a time with a progress notice and a Stop button.
+   */
+  async function deleteCards(cards) {
+    if (deleting) return toast("A delete is already running.");
+    const protectedCards = cards.filter((c) => CLMData.isProtected(c.id));
+    const targets = cards.filter((c) => !CLMData.isProtected(c.id));
+    if (!targets.length) return toast(`${names(protectedCards)} is built into Marinara and cannot be deleted.`);
+    const n = targets.length;
+    const listed = targets.slice(0, 12).map((c) => `  • ${c.name}${c.creator ? ` (by ${c.creator})` : ""}`);
+    if (n > 12) listed.push(`  …and ${(n - 12).toLocaleString()} more`);
+    const what = n === 1 ? `“${targets[0].name}”` : `these ${n.toLocaleString()} characters`;
+    const skipped = protectedCards.length ? `\n\n${names(protectedCards)} is built in and will be skipped.` : "";
+    const message =
+      `Permanently delete ${what}?\n\n${listed.join("\n")}\n\n` +
+      "This cannot be undone. Marinara also removes them from their chats and deletes their gallery images. " +
+      `Their chats are kept.${skipped}`;
+    if (!window.confirm(message)) return;
+    if (n >= 10) {
+      const typed = window.prompt(`To confirm, type the number of characters to delete (${n.toLocaleString()}):`, "");
+      if (typed === null) return;
+      if (typed.replace(/[\s,.]/g, "") !== String(n)) return toast("Number did not match. Nothing was deleted.");
+    }
+
+    deleting = true;
+    let stop = false;
+    const notice = toast(`Deleting 0 of ${n.toLocaleString()}…`, {
+      duration: 24 * 60 * 60 * 1000,
+      action: {
+        label: "Stop",
+        keep: true,
+        run: (button) => {
+          stop = true;
+          button.disabled = true;
+          button.textContent = "Stopping…";
+        },
+      },
+    });
+    const text = notice.firstChild;
+    try {
+      const result = await CLMData.deleteCharacters(
+        targets.map((c) => c.id),
+        {
+          shouldStop: () => stop,
+          onProgress: (done, total) => (text.textContent = `Deleting ${done.toLocaleString()} of ${total.toLocaleString()}…`),
+        },
+      );
+      notice.remove();
+      const deleted = result.deletedIds.length;
+      const parts = [`Deleted ${deleted === 1 && n === 1 ? `“${targets[0].name}”` : `${deleted.toLocaleString()} character${deleted === 1 ? "" : "s"}`}.`];
+      if (stop && deleted + result.failed.length < n) parts.push(`Stopped; ${(n - deleted - result.failed.length).toLocaleString()} not deleted.`);
+      if (result.failed.length) {
+        parts.push(`${result.failed.length.toLocaleString()} failed: ${result.failed[0].error.message}`);
+        for (const { id, error } of result.failed) marinara.log.error(`Could not delete ${id}`, error);
+      }
+      toast(parts.join(" "), { error: !!result.failed.length, duration: 12000 });
+    } catch (error) {
+      notice.remove();
+      fail("Delete failed", error);
+    } finally {
+      deleting = false;
+    }
+  }
+
+  function deleteButton(cards, { label = " Delete" } = {}) {
+    const { h, icon } = CLMManager;
+    return h(
+      "button.clm-btn.clm-btn--danger",
+      {
+        attrs: { type: "button", title: cards.length === 1 ? `Permanently delete ${cards[0].name}` : "Permanently delete the selected characters" },
+        on: { click: () => void deleteCards(cards) },
+      },
+      icon("trash"),
+      label,
+    );
+  }
+
   marinara.onCleanup(() => {
     toastRoot?.remove();
     document.getElementById("clm-all-tags")?.remove();
   });
 
-  return Object.freeze({ toast, removeTagButton, addTagField, favoriteButton, bulkTag, updateTagDatalist, folderPicker, removeFromFolderButton });
+  return Object.freeze({ toast, removeTagButton, addTagField, favoriteButton, bulkTag, updateTagDatalist, folderPicker, removeFromFolderButton, deleteCards, deleteButton });
 })();
