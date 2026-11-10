@@ -207,6 +207,16 @@ test("source links from Bot Browser, Chub and V3 source fields", () => {
   assert.deepEqual(CLM.sourceLinks({ source: ["https://www.example.com/c/1", "javascript:alert(1)", "not a url"], extensions: {} }), [
     { label: "example.com", url: "https://www.example.com/c/1" },
   ]);
+  // Char Importer and Botbooru markers.
+  assert.deepEqual(
+    CLM.sourceLinks({ extensions: { char_importer: { source_url: "https://botbooru.com/download/png/42" }, botbooru: { post_id: 42, full_path: "uploader/42" } } }),
+    [{ label: "Botbooru", url: "https://botbooru.com/character/42" }],
+  );
+  assert.deepEqual(CLM.sourceLinks({ extensions: { botbooru: { post_id: "7" } } }), [{ label: "Botbooru", url: "https://botbooru.com/character/7" }]);
+  assert.deepEqual(
+    CLM.sourceLinks({ extensions: { char_importer: { source_url: "https://www.chub.ai/characters/someone/bot/" }, chub: { full_path: "someone/bot" } } }),
+    [{ label: "Chub", url: "https://www.chub.ai/characters/someone/bot/" }],
+  );
   // Unknown sites and empty cards give nothing.
   assert.deepEqual(CLM.sourceLinks({ extensions: { botBrowserSource: "plotlight:x" } }), []);
   assert.deepEqual(CLM.sourceLinks({}), []);

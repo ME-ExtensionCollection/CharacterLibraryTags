@@ -109,7 +109,7 @@ export function buildLibrary({ count = 3000, seed = 1 } = {}) {
   const SPECIAL_SOURCES = [
     { botBrowserSource: "chub:kestrel/alice-1234", chub: { id: "kestrel/alice-1234" } },
     { chub: { full_path: "q/alice-in-chains" } },
-    {},
+    { char_importer: { source_url: "https://botbooru.com/character/31337" }, botbooru: { post_id: 31337, full_path: "uploader/31337" } },
     { botBrowserSource: "janny:9f2c" },
     {},
   ];

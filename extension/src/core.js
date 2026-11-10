@@ -465,22 +465,57 @@ const CLM = (() => {
     }
   };
 
+  /** Friendly site name for a link's host. */
+  const HOST_LABELS = [
+    [/(^|\.)(chub\.ai|characterhub\.org)$/, "Chub"],
+    [/(^|\.)botbooru\.com$/, "Botbooru"],
+    [/(^|\.)(jannyai\.com|janitorai\.com)$/, "JannyAI"],
+    [/(^|\.)pygmalion\.chat$/, "Pygmalion"],
+    [/(^|\.)wyvern\.chat$/, "Wyvern"],
+    [/(^|\.)datacat\.run$/, "DataCat"],
+    [/(^|\.)realm\.risuai\.net$/, "RisuRealm"],
+  ];
+  const hostLabel = (url) => {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    return HOST_LABELS.find(([re]) => re.test(host))?.[1] ?? host;
+  };
+
+  /** Botbooru download / post addresses point at the character page instead. */
+  const tidyUrl = (url) => {
+    const u = new URL(url);
+    if (u.hostname.replace(/^www\./, "") === "botbooru.com") {
+      const parts = u.pathname.split("/").filter(Boolean);
+      const id = parts[0] === "post" ? parts[1] : parts[0] === "download" ? parts[2] : null;
+      if (/^\d+$/.test(id ?? "")) return `https://botbooru.com/character/${id}`;
+    }
+    return u.href;
+  };
+  const sameUrl = (url) => url.toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/\/+$/, "");
+
   /**
    * Links to the page(s) a character was downloaded from, from its full card data
    * (the `data` object of GET /api/characters/:id). Returns [{ label, url }] with
-   * only http(s) addresses, most specific first, without duplicates.
+   * only http(s) addresses, most specific first, without duplicates. Reads
+   * Char Importer's `extensions.char_importer.source_url`, Botbooru's
+   * `extensions.botbooru.post_id`, Marinara's Bot Browser marker, Chub's
+   * `extensions.chub.full_path`, `extensions.source_url` and V3 `source`.
    */
   function sourceLinks(data) {
     const out = [];
-    const add = (label, url) => {
+    const add = (url, label = null) => {
       const safe = webUrl(url);
-      if (safe && !out.some((l) => l.url === safe)) out.push({ label, url: safe });
+      if (!safe) return;
+      const tidy = tidyUrl(safe);
+      if (!out.some((l) => sameUrl(l.url) === sameUrl(tidy))) out.push({ label: label ?? hostLabel(tidy), url: tidy });
     };
     const ext = data && typeof data.extensions === "object" && data.extensions ? data.extensions : {};
     const fromSite = (site, id) => {
       const known = SOURCE_SITES[site];
-      if (known && typeof id === "string" && id.trim()) add(known.label, known.url(id.trim(), data.name));
+      if (known && typeof id === "string" && id.trim()) add(known.url(id.trim(), data.name), known.label);
     };
+    add(ext.char_importer?.source_url);
+    const booru = String(ext.botbooru?.post_id ?? "");
+    if (/^\d+$/.test(booru)) add(`https://botbooru.com/character/${booru}`);
     if (typeof ext.botBrowserSource === "string") {
       const at = ext.botBrowserSource.indexOf(":");
       if (at > 0) fromSite(ext.botBrowserSource.slice(0, at), ext.botBrowserSource.slice(at + 1));
@@ -491,11 +526,9 @@ const CLM = (() => {
     }
     const chubPath = ext.chub?.full_path ?? ext.chub?.fullPath;
     if (typeof chubPath === "string" && chubPath.includes("/")) fromSite("chub", chubPath);
+    add(ext.source_url);
     const sources = Array.isArray(data?.source) ? data.source : [data?.source];
-    for (const value of sources) {
-      const url = webUrl(value);
-      if (url) add(new URL(url).hostname.replace(/^www\./, ""), url);
-    }
+    for (const value of sources) add(value);
     return out;
   }
 

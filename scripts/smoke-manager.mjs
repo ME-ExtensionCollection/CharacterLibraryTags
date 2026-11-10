@@ -449,6 +449,12 @@ export default async function ({ withPage, assert, BASE }) {
     await open("Messy Mel");
     assert.deepEqual(await href(), ["https://example.com/cards/messy-mel"]);
     await open("Untagged Ursula");
+    assert.deepEqual(await href(), ["https://botbooru.com/character/31337"]);
+    assert.match(await page.textContent(".clm-details-source"), /Open on Botbooru/);
+    // Generated cards have no source.
+    await page.fill(".clm-search", "");
+    await page.click('.clm-card[data-id^="mock-"] >> nth=0');
+    await page.waitForFunction(() => document.querySelector(".clm-details-source:not([hidden])")?.textContent.includes("No download link saved"));
     assert.deepEqual(await href(), []);
     assert.match(await page.textContent(".clm-details-source"), /No download link saved/);
   });
