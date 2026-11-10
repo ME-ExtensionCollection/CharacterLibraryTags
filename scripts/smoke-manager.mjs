@@ -446,8 +446,33 @@ export default async function ({ withPage, assert, BASE }) {
     await waitCount(page, 2992, 2992);
     assert.equal(await page.isHidden(".clm-selbar"), true);
     const stats = await (await fetch(`${BASE}/__mock/stats`)).json();
-    assert.ok(stats.maxDeletesInFlight > 1 && stats.maxDeletesInFlight <= 4, `in flight: ${stats.maxDeletesInFlight}`);
+    assert.ok(stats.maxDeletesInFlight === 2, `in flight: ${stats.maxDeletesInFlight}`);
   });
+
+  await withPage("manager-delete-dropped-connection", async (page) => {
+    // Two delete requests fail at the network level: the extension retries them.
+    let aborted = 0;
+    await page.route("**/api/characters/*", (route) => {
+      if (route.request().method() === "DELETE" && aborted < 2) {
+        aborted += 1;
+        return route.abort("connectionreset");
+      }
+      return route.continue();
+    });
+    // Delete 2 goes through on the server but the answer is lost: the retry's 404 counts as done.
+    await fetch(`${BASE}/__mock/reset?dropDeletes=2,3,4`, { method: "POST" });
+    await openManager(page);
+    await page.click('.clm-card[data-index="0"]');
+    await page.click('.clm-card[data-index="3"]', { modifiers: ["Shift"] });
+    const picked = await page.$$eval(".clm-card--checked", (n) => n.map((x) => x.dataset.id));
+    await page.click(".clm-selbar .clm-btn--danger");
+    await page.click(".clm-dialog-confirm");
+    await page.waitForSelector(".clm-toast:has-text('retrying')");
+    await page.waitForSelector(".clm-toast:has-text('Deleted 4 characters')", { timeout: 30000 });
+    assert.equal(await page.$(".clm-toast--error"), null);
+    assert.equal(aborted, 2);
+    for (const id of picked) assert.equal((await fetch(`${BASE}/api/characters/${id}`)).status, 404);
+  }, { allowErrors: /ERR_EMPTY_RESPONSE|ERR_CONNECTION_RESET|Failed to load resource|404/ });
 
   await withPage("manager-delete-rate-limit", async (page) => {
     // Marinara-style 429s: the run waits, retries and still deletes everything.

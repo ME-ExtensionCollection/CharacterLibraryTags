@@ -287,21 +287,26 @@ const CLMData = (() => {
   /** Marinara refuses to delete its built-in guide character. */
   const PROTECTED_IDS = new Set(["__professor_mari__"]);
 
-  // Deletes run a few at a time. Marinara does the database part of each one
+  // Deletes run two at a time. Marinara does the database part of each one
   // under a global lock (it scans every chat, folder and lorebook link), so
-  // more in flight only overlaps the round trips and file cleanup. The pace cap
-  // keeps well under Marinara's shared limit of 600 API requests a minute, so
-  // its own UI and other extensions keep working during a big delete.
-  const DELETE_PARALLEL = 4;
+  // more in flight only overlaps the round trips and file cleanup, and extra
+  // requests just wait in line on a busy server (where a long wait can end in
+  // a dropped connection). The pace cap keeps well under Marinara's shared
+  // limit of 600 API requests a minute, so its own UI and other extensions
+  // keep working during a big delete.
+  const DELETE_PARALLEL = 2;
+  const TRANSIENT_RETRIES = [1000, 3000, 8000];
   const DELETE_PER_SECOND = 5;
   const sleep = (ms) => new Promise((resolve) => marinara.setTimeout(resolve, ms));
 
   /**
    * Permanently delete characters. `onProgress(done, total)` runs after each one;
    * `shouldStop()` returning true stops starting new ones. A "too many requests"
-   * answer pauses every worker for the time the server asks, then retries.
+   * answer pauses every worker for the time the server asks, then retries. A
+   * dropped connection or a server error (5xx) is retried a few times; if the
+   * first try did delete the card, the retry's 404 counts as done.
    */
-  async function deleteCharacters(ids, { onProgress = () => {}, shouldStop = () => false, onWait = () => {} } = {}) {
+  async function deleteCharacters(ids, { onProgress = () => {}, shouldStop = () => false, onWait = () => {}, onRetry = () => {} } = {}) {
     const result = { deletedIds: [], failed: [], skippedIds: [] };
     const todo = ids.filter((id) => {
       if (!PROTECTED_IDS.has(id)) return true;
@@ -313,6 +318,7 @@ const CLMData = (() => {
     let pausedUntil = 0; // set by a 429
     const gap = 1000 / DELETE_PER_SECOND;
     const deleteOne = async (id) => {
+      let transient = 0;
       for (let attempt = 0; ; attempt += 1) {
         const now = Date.now();
         const wait = Math.max(nextStartAt, pausedUntil) - now;
@@ -324,6 +330,12 @@ const CLMData = (() => {
         } catch (error) {
           // Already gone (deleted elsewhere): nothing left to do.
           if (error.status === 404) return;
+          const isTransient = error.status === undefined || error.status >= 500;
+          if (isTransient && transient < TRANSIENT_RETRIES.length && !shouldStop()) {
+            onRetry(id, error);
+            await sleep(TRANSIENT_RETRIES[transient++]);
+            continue;
+          }
           if (error.status !== 429 || attempt >= 5) throw error;
           const seconds = Math.min(Math.max(error.retryAfter ?? 5, 1), 90);
           pausedUntil = Math.max(pausedUntil, Date.now() + seconds * 1000);

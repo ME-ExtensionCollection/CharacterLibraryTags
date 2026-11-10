@@ -363,14 +363,14 @@ const CLMEdit = (() => {
    * From 10 up, the count must be typed too. Runs one request at a time
    * with a progress notice and a Stop button.
    */
-  async function deleteCards(cards) {
+  async function deleteCards(cards, { confirmed = false } = {}) {
     if (deleting) return toast("A delete is already running.");
     const { h, icon } = CLMManager;
     const protectedCards = cards.filter((c) => CLMData.isProtected(c.id));
     const targets = cards.filter((c) => !CLMData.isProtected(c.id));
     if (!targets.length) return toast(`${names(protectedCards)} is built into Marinara and cannot be deleted.`);
     const n = targets.length;
-    const ok = await confirmDialog({
+    const ok = confirmed || await confirmDialog({
       title: n === 1 ? `Delete “${targets[0].name}”?` : `Delete ${n.toLocaleString()} characters?`,
       danger: true,
       confirmLabel: n === 1 ? "Delete" : `Delete ${n.toLocaleString()}`,
@@ -408,28 +408,64 @@ const CLMEdit = (() => {
       },
     });
     const text = notice.firstChild;
+    // The notice ticks every second, so a slow server still shows the run is alive.
+    const started = Date.now();
+    let done = 0;
+    let status = "";
+    const clock = () => {
+      const seconds = Math.floor((Date.now() - started) / 1000);
+      return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    };
+    const paint = () => (text.textContent = `Deleting ${done.toLocaleString()} of ${n.toLocaleString()}… ${clock()}${status ? ` · ${status}` : ""}`);
+    let ticking = true;
+    const tick = () => {
+      if (!ticking) return;
+      paint();
+      marinara.setTimeout(tick, 1000);
+    };
+    tick();
     try {
       const result = await CLMData.deleteCharacters(
         targets.map((c) => c.id),
         {
           shouldStop: () => stop,
-          onProgress: (done, total) => (text.textContent = `Deleting ${done.toLocaleString()} of ${total.toLocaleString()}…`),
-          onWait: (seconds) => (text.textContent = `Marinara asked to slow down; waiting ${seconds} s…`),
+          onProgress: (count) => {
+            done = count;
+            status = "";
+            paint();
+          },
+          onWait: (seconds) => {
+            status = `Marinara asked to slow down, waiting ${seconds} s`;
+            paint();
+          },
+          onRetry: () => {
+            status = "connection dropped, retrying";
+            paint();
+          },
         },
       );
+      ticking = false;
       notice.remove();
       const deleted = result.deletedIds.length;
-      const parts = [`Deleted ${deleted === 1 && n === 1 ? `“${targets[0].name}”` : `${deleted.toLocaleString()} character${deleted === 1 ? "" : "s"}`}.`];
+      const parts = [`Deleted ${deleted === 1 && n === 1 ? `“${targets[0].name}”` : `${deleted.toLocaleString()} character${deleted === 1 ? "" : "s"}`} in ${clock()}.`];
       if (stop && deleted + result.failed.length < n) parts.push(`Stopped; ${(n - deleted - result.failed.length).toLocaleString()} not deleted.`);
+      const failedCards = result.failed.map(({ id }) => targets.find((c) => c.id === id)).filter(Boolean);
       if (result.failed.length) {
         parts.push(`${result.failed.length.toLocaleString()} failed: ${result.failed[0].error.message}`);
         for (const { id, error } of result.failed) marinara.log.error(`Could not delete ${id}`, error);
       }
-      toast(parts.join(" "), { error: !!result.failed.length, duration: 12000 });
+      toast(parts.join(" "), {
+        error: !!result.failed.length,
+        duration: result.failed.length ? 60000 : 12000,
+        // They were confirmed already; Retry deletes just the ones that failed.
+        action: failedCards.length ? { label: "Retry", run: () => void deleteCards(failedCards, { confirmed: true }) } : null,
+      });
     } catch (error) {
+      ticking = false;
       notice.remove();
       fail("Delete failed", error);
     } finally {
+      ticking = false;
       deleting = false;
     }
   }

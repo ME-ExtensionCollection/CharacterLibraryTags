@@ -28,6 +28,8 @@ build();
 
 const api = createMockApi({ count: COUNT });
 let deletesInFlight = 0;
+let dropDeletes = new Set();
+let deleteRequests = 0;
 let maxDeletesInFlight = 0;
 
 async function readBody(req) {
@@ -54,6 +56,10 @@ createServer(async (req, res) => {
   }
   if (url.pathname === "/__mock/reset" && req.method === "POST") {
     api.reset({ count: Number(url.searchParams.get("count")) || COUNT, deleteLimit: Number(url.searchParams.get("deleteLimit")) || 0 });
+    // ?dropDeletes=a,b: drop the connection on those delete requests (1-based),
+    // after the delete went through, like a server that finished but never answered.
+    dropDeletes = new Set((url.searchParams.get("dropDeletes") ?? "").split(",").filter(Boolean).map(Number));
+    deleteRequests = 0;
     deletesInFlight = 0;
     maxDeletesInFlight = 0;
     return sendJson(res, 200, { count: api.rows.length });
@@ -75,6 +81,7 @@ createServer(async (req, res) => {
     if (isDelete) deletesInFlight -= 1;
     const body = req.method === "GET" ? null : await readBody(req);
     const result = api.handle(req.method, url, body, req.headers);
+    if (isDelete && dropDeletes.has(++deleteRequests)) return req.socket.destroy();
     if (!result) return sendJson(res, 404, { error: "Mock route not found" });
     return sendJson(res, result[0], result[1]);
   }
