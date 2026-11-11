@@ -171,6 +171,8 @@ const CLMManager = (() => {
     scores: null,
     scoresPending: false,
     triageDecisions: null, // Char Triage: card id -> latest decision (kept cards show a check)
+    triageHints: null, // Char Triage: card id -> 0..1 hint from card tags/creator, unscanned cards only
+    triageStatus: null, // Char Triage: card id -> "current" | "outdated" | "no-avatar"
     viewed: new Set(), // opened in the details pane this session (implied keeps on close)
     multi: new Set(), // ids picked with Ctrl/Shift-click or the card checkboxes
     anchorId: null, // last plain or Ctrl click, for Shift-click ranges
@@ -778,31 +780,61 @@ const CLMManager = (() => {
     const tagMergerRow = h("div.clm-tagmerger", {}, h("span.clm-label", { text: "Tag Merger:" }), canonicalLabel, foldLabel);
     const tagRows = h("div.clm-tag-rows", {}, ...fields.map((f) => f.row), tagMergerRow);
 
-    // Char Triage keeps: one button that cycles blank (any) -> ✓ (only kept) -> ✗ (hide kept).
-    const KEPT_STATES = [
-      [null, "", "Kept cards: shown (click: only kept)"],
-      ["only", "✓", "Only cards you kept (click: hide kept)"],
-      ["hide", "✗", "Kept cards hidden (click: show all)"],
-    ];
-    const keptButton = h("button.clm-btn.clm-kept-toggle", {
-      attrs: { type: "button" },
-      on: {
-        click: () => {
-          const at = KEPT_STATES.findIndex(([v]) => v === (S.query.kept ?? null));
-          S.query.kept = KEPT_STATES[(at + 1) % KEPT_STATES.length][0];
-          update();
-        },
-      },
-    });
-    const keptToggle = h("div.clm-adv-group.clm-kept-group", { attrs: { hidden: true } }, h("span.clm-label", { text: "Kept" }), keptButton);
+    /**
+     * A Char Triage filter as one small button that cycles through `states`
+     * ([value, mark, title]); right-click goes back. Shown only with Char
+     * Triage running (or while on, so it can be turned off).
+     */
+    function cycleToggle(key, label, states, extraClass) {
+      const button = h(`button.clm-btn.clm-cycle-toggle.${extraClass}`, { attrs: { type: "button" } });
+      const step = (by) => {
+        const at = states.findIndex(([v]) => v === (S.query[key] ?? null));
+        S.query[key] = states[(at + by + states.length) % states.length][0];
+        update();
+      };
+      button.addEventListener("click", () => step(1));
+      button.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        step(-1);
+      });
+      const group = h(`div.clm-adv-group.${extraClass}-group`, { attrs: { hidden: true } }, h("span.clm-label", { text: label }), button);
+      const render = () => {
+        const [, mark, title] = states.find(([v]) => v === (S.query[key] ?? null)) ?? states[0];
+        button.textContent = mark;
+        button.title = `${title} (right-click: back)`;
+        button.setAttribute("aria-label", title);
+        button.classList.toggle("clm-on", !!S.query[key]);
+        group.hidden = !CLMData.charTriage() && !S.query[key];
+      };
+      return { group, render };
+    }
+    // Keeps: blank (any) -> ✓ (only kept) -> ✗ (hide kept).
+    const keptCycle = cycleToggle(
+      "kept",
+      "Kept",
+      [
+        [null, "", "Kept cards: shown (click: only kept)"],
+        ["only", "✓", "Only cards you kept (click: hide kept)"],
+        ["hide", "✗", "Kept cards hidden (click: show all)"],
+      ],
+      "clm-kept",
+    );
+    // Scans: blank (any) -> ✓ (every question asked) -> ↻ (some questions new or changed) -> ✗ (never).
+    const scannedCycle = cycleToggle(
+      "scanned",
+      "Scanned",
+      [
+        [null, "", "Scanned or not: all cards (click: fully scanned)"],
+        ["current", "✓", "Scanned with every current question (click: needs new questions)"],
+        ["outdated", "↻", "Scanned, but some questions are new or changed: select all and Ask Char Triage to update (click: never scanned)"],
+        ["never", "✗", "Never scanned, or no avatar (click: all cards)"],
+      ],
+      "clm-scanned",
+    );
+    const keptToggle = h("div.clm-adv-pair", {}, keptCycle.group, scannedCycle.group);
     const renderKeptToggle = () => {
-      const [, mark, title] = KEPT_STATES.find(([v]) => v === (S.query.kept ?? null)) ?? KEPT_STATES[0];
-      keptButton.textContent = mark;
-      keptButton.title = title;
-      keptButton.setAttribute("aria-label", title);
-      keptButton.classList.toggle("clm-on", !!S.query.kept);
-      // Only with Char Triage running (or while the filter is on, so it can be turned off).
-      keptToggle.hidden = !CLMData.charTriage() && !S.query.kept;
+      keptCycle.render();
+      scannedCycle.render();
     };
 
     // Advanced filters
@@ -1001,16 +1033,20 @@ const CLMManager = (() => {
     const score = S.scores?.get(card.id);
     // Kept (marked fine) cards show a check instead of their number, so cleared false positives stand out.
     const kept = S.triageDecisions?.get(card.id) === "keep";
-    const band = kept ? "kept" : score === undefined ? "" : String(CLM.scoreBand(score));
+    // Not scanned: an outlined "?N" hint from card tags and creator, never a plain number.
+    const hint = score === undefined ? S.triageHints?.get(card.id) : undefined;
+    const band = kept ? "kept" : score !== undefined ? String(CLM.scoreBand(score)) : hint !== undefined ? `?${CLM.scoreBand(hint)}` : "";
     const badge = node.children[6];
     if (badge.dataset.band !== band) {
       badge.dataset.band = band;
       badge.textContent = kept ? "✓" : band;
       badge.title = kept
         ? `Kept: you marked this fine for Char Triage${score === undefined ? "" : ` (it scores ${CLM.scoreBand(score)} of 5)`}`
-        : band
-          ? `Char Triage: ${band} of 5 (${Math.round(score * 100)}% likely disliked)`
-          : "";
+        : score !== undefined
+          ? `Char Triage: ${band} of 5 (${Math.round(score * 100)}% likely disliked, from the picture)`
+          : hint !== undefined
+            ? `Not scanned. Hint from card tags and creator: ${CLM.scoreBand(hint)} of 5. Worth scanning? (Ask Char Triage)`
+            : "";
     }
     node.setAttribute("aria-selected", String(card.id === S.selectedId));
   }
@@ -1124,7 +1160,8 @@ const CLMManager = (() => {
     S.sort === "dislike-desc" ||
     /(^|\s)-?score:/iu.test(S.query.text ?? "") ||
     /(^|[\s#~-])image:/iu.test(S.query.text ?? "") ||
-    [...chipKeys()].some(CLM.isImageTag);
+    [...chipKeys()].some(CLM.isImageTag) ||
+    !!S.query.scanned;
 
   /** Decisions are never held back: a Keep should show its check at once. */
   function loadDecisions() {
@@ -1137,6 +1174,8 @@ const CLMManager = (() => {
     const triage = CLMData.charTriage();
     S.scores = triage?.scores() ?? null;
     S.imageTags = typeof triage?.imageTags === "function" ? triage.imageTags() : null;
+    S.triageHints = typeof triage?.hints === "function" ? triage.hints() : null;
+    S.triageStatus = typeof triage?.scanStatus === "function" ? triage.scanStatus() : null;
     S.scoresPending = false;
   }
 
@@ -1175,13 +1214,17 @@ const CLMManager = (() => {
     }
   }
 
-  async function scanSelected() {
+  async function scanSelected({ all = false } = {}) {
     const triage = CLMData.charTriage();
     const cards = selectedCards();
     if (typeof triage?.scanCards !== "function" || !cards.length) return;
     try {
-      const n = await triage.scanCards(cards.map((c) => c.id));
-      CLMEdit.toast(n ? `Char Triage is asking about ${plural(n, "character")}.` : "Char Triage already has every answer for these.");
+      const n = await triage.scanCards(cards.map((c) => c.id), { all });
+      CLMEdit.toast(
+        n
+          ? `Char Triage is asking about ${plural(n, "character")}${all ? " (every question again)" : ""}.`
+          : "Char Triage already has every answer for these. Shift-click to ask everything again.",
+      );
     } catch (error) {
       CLMEdit.toast(`Char Triage could not scan: ${error.message}`, { error: true });
     }
@@ -1273,7 +1316,7 @@ const CLMManager = (() => {
       h("span.clm-selbar-sep"),
       h(
         "button.clm-btn.clm-selbar-scan",
-        { attrs: { type: "button", title: "Ask Char Triage's vision model about these cards now (only the questions each still needs)" }, on: { click: () => void scanSelected() } },
+        { attrs: { type: "button", title: "Ask Char Triage's vision model about these cards now (only the questions each still needs). Shift-click: every question again." }, on: { click: (e) => void scanSelected({ all: e.shiftKey }) } },
         "Ask Char Triage",
       ),
       h(
@@ -1584,7 +1627,7 @@ const CLMManager = (() => {
   function compute() {
     if (S.indexedItems !== CLMData.items || S.indexedFolders !== CLMData.folders || S.indexedImageTags !== S.imageTags) rebuildIndex();
     scheduleServerSearch();
-    const filtered = CLM.filter(S.index, S.query, { serverIds: S.serverIds, scores: S.scores, decisions: S.triageDecisions });
+    const filtered = CLM.filter(S.index, S.query, { serverIds: S.serverIds, scores: S.scores, decisions: S.triageDecisions, scanStatus: S.triageStatus });
     S.results = CLM.sortCards(filtered, S.sort, S.seed, { scores: S.scores });
     S.facets = CLM.facetCounts(S.results);
   }
@@ -1731,8 +1774,8 @@ const CLMManager = (() => {
 
   function clearAll() {
     // Scope and the kept filter are ways of looking, not filters to clear while reviewing.
-    const { scope, kept } = S.query;
-    S.query = { ...CLM.emptyQuery(), scope, kept };
+    const { scope, kept, scanned } = S.query;
+    S.query = { ...CLM.emptyQuery(), scope, kept, scanned };
     S.labels.clear();
     ui.searchInput.value = "";
     update();

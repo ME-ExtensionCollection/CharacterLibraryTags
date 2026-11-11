@@ -694,11 +694,13 @@ export default async function ({ withPage, assert, BASE }) {
         const scores = window.marinaraCharTriage.scores();
         return cards.map((c) => {
           const s = scores.get(c.dataset.id);
-          return [c.querySelector(".clm-card-score").textContent, s === undefined ? "" : String(Math.max(0, Math.min(5, Math.round(s * 5))))];
+          const band = (x) => String(Math.max(0, Math.min(5, Math.round(x * 5))));
+          const hint = window.marinaraCharTriage.hints().get(c.dataset.id);
+          return [c.querySelector(".clm-card-score").textContent, s !== undefined ? band(s) : hint !== undefined ? `?${band(hint)}` : ""];
         });
       });
     const shown = await badges();
-    assert.ok(shown.some(([, want]) => want === "") && shown.some(([, want]) => want === "5"));
+    assert.ok(shown.some(([, want]) => want.startsWith("?")) && shown.some(([, want]) => want === "5"));
     for (const [got, want] of shown) assert.equal(got, want);
     // Triage button opens Char Triage's panel.
     await page.click(".clm-triage");
@@ -729,9 +731,12 @@ export default async function ({ withPage, assert, BASE }) {
     await page.evaluate(() => window.__triage.retrain(0));
     await page.waitForFunction(() => {
       const scores = window.marinaraCharTriage.scores();
+      const hints = window.marinaraCharTriage.hints();
+      const band = (x) => String(Math.max(0, Math.min(5, Math.round(x * 5))));
       return [...document.querySelectorAll(".clm-card")].every((c) => {
         const s = scores.get(c.dataset.id);
-        return c.querySelector(".clm-card-score").textContent === (s === undefined ? "" : String(Math.max(0, Math.min(5, Math.round(s * 5)))));
+        const hint = hints.get(c.dataset.id);
+        return c.querySelector(".clm-card-score").textContent === (s !== undefined ? band(s) : hint !== undefined ? `?${band(hint)}` : "");
       });
     });
     assert.equal(await page.isHidden(".clm-scores-pending"), true);
@@ -851,8 +856,8 @@ export default async function ({ withPage, assert, BASE }) {
     await page.waitForSelector(".clm-kept-group:not([hidden])");
     const ids = await page.$$eval(".clm-card", (n) => n.slice(0, 3).map((x) => x.dataset.id));
     await page.evaluate((ids) => window.marinaraCharTriage.recordKeep(ids.slice(0, 2)), ids);
-    const toggle = ".clm-kept-toggle";
-    const mark = (m) => page.waitForFunction((m) => document.querySelector(".clm-kept-toggle").textContent.trim() === m, m);
+    const toggle = "button.clm-kept";
+    const mark = (m) => page.waitForFunction((m) => document.querySelector("button.clm-kept").textContent.trim() === m, m);
     await mark("");
     // ✓: only kept.
     await page.click(toggle);
@@ -881,4 +886,41 @@ export default async function ({ withPage, assert, BASE }) {
     await page.click("[data-toggle='showAdvanced']");
     assert.equal(await page.isHidden(".clm-kept-group"), true);
   });
+
+  await withPage("manager-scanned-filter", async (page, shot) => {
+    await openManager(page);
+    await page.click("[data-toggle='showAdvanced']");
+    await page.waitForSelector(".clm-scanned-group:not([hidden])");
+    const ids = await page.evaluate(async () => (await (await fetch("/api/characters/catalog?view=summary")).json()).items.map((i) => i.id));
+    const count = (pred) => page.evaluate(({ ids, pred }) => {
+      const st = window.marinaraCharTriage.scanStatus();
+      return ids.filter((id) => eval(pred)(st.get(id))).length;
+    }, { ids, pred });
+    const mark = (m) => page.waitForFunction((m) => document.querySelector("button.clm-scanned").textContent.trim() === m, m);
+    const button = "button.clm-scanned";
+    // Checkbox-sized.
+    const size = await page.$eval(button, (n) => [n.offsetWidth, n.offsetHeight]);
+    assert.ok(size[0] <= 26 && size[1] <= 26, `toggle is ${size}`);
+    await page.click(button);
+    await mark("✓");
+    await waitCount(page, await count("(s) => s === 'current'"));
+    await page.click(button);
+    await mark("↻");
+    await waitCount(page, await count("(s) => s === 'outdated'"));
+    await page.click(button);
+    await mark("✗");
+    await waitCount(page, await count("(s) => s !== 'current' && s !== 'outdated'"));
+    // Never-scanned cards show the outlined hint, not a number.
+    const badge = await page.$eval(".clm-card .clm-card-score", (n) => n.textContent);
+    assert.match(badge, /^\?\d$/);
+    await shot("never");
+    // Right-click goes back.
+    await page.click(button, { button: "right" });
+    await mark("↻");
+    // Shift-click Ask Char Triage: every question.
+    await page.click('.clm-card[data-index="0"]', { modifiers: ["Control"] });
+    await page.click(".clm-selbar-scan", { modifiers: ["Shift"] });
+    await page.waitForSelector(".clm-toast:has-text('every question again')");
+    assert.equal(await page.evaluate(() => window.__triage.scanAll), true);
+  }, { query: "?ctr=1" });
 }

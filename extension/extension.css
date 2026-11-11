@@ -1228,19 +1228,46 @@
   background: var(--clm-danger);
 }
 
-.clm-kept-toggle {
-  min-width: 2rem;
-  font-weight: 700;
+/* Small blank / ✓ / ✗ cycle buttons (Kept, Scanned), checkbox-sized. */
+.clm-btn.clm-cycle-toggle {
+  width: 1.5rem;
+  min-width: 0;
+  height: 1.5rem;
+  min-height: 0;
+  padding: 0;
+  border-radius: 0.35rem;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.clm-adv-pair {
+  display: contents;
 }
 
 /* Kept: quiet, since most of a library ends up kept. Clearer on hover. */
+/* Not scanned: a hint from card tags and creator, outlined so it never passes for a result. */
+.clm-card-score[data-band^="?"] {
+  border: 1px dashed rgb(255 255 255 / 0.55);
+  background: rgb(0 0 0 / 0.35);
+  color: rgb(255 255 255 / 0.75);
+  font-weight: 400;
+}
+
 .clm-card-score[data-band="kept"] {
   background: rgb(0 0 0 / 0.35);
   color: rgb(255 255 255 / 0.55);
   font-weight: 400;
 }
 
-.clm-card:hover .clm-card-score[data-band="kept"] {
+.clm-card:hover /* Not scanned: a hint from card tags and creator, outlined so it never passes for a result. */
+.clm-card-score[data-band^="?"] {
+  border: 1px dashed rgb(255 255 255 / 0.55);
+  background: rgb(0 0 0 / 0.35);
+  color: rgb(255 255 255 / 0.75);
+  font-weight: 400;
+}
+
+.clm-card-score[data-band="kept"] {
   color: rgb(255 255 255 / 0.85);
 }
 

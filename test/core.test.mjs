@@ -304,3 +304,15 @@ test("kept filter: only kept, hide kept (explicit keeps only)", () => {
   assert.equal(q("hide", {}).length, 6);
   assert.equal(CLM.activeFilterCount({ ...CLM.emptyQuery(), kept: "hide" }), 1);
 });
+
+test("scanned filter: current, outdated, never (no avatar counts as never)", () => {
+  const scanStatus = new Map([["a", "current"], ["b", "outdated"], ["c", "no-avatar"], ["d", "current"]]);
+  const q = (scanned, extra = { scanStatus }) => run({ scanned }, extra);
+  assert.deepEqual(q("current"), ["a", "d"]);
+  assert.deepEqual(q("outdated"), ["b"]);
+  assert.deepEqual(q("never"), ["c", "e", "f"]);
+  assert.equal(q(null).length, 6);
+  assert.deepEqual(q("current", {}), []);
+  assert.equal(q("never", {}).length, 6);
+  assert.equal(CLM.activeFilterCount({ ...CLM.emptyQuery(), scanned: "never", kept: "hide" }), 2);
+});

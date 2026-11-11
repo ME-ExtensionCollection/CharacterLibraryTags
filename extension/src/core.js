@@ -47,6 +47,7 @@ const CLM = (() => {
       favoritesOnly: false,
       untaggedOnly: false,
       kept: null, // Char Triage keeps: null = any, "only" = only kept cards, "hide" = hide kept cards
+      scanned: null, // Char Triage scans: null = any, "current" = every question asked, "outdated" = some new, "never"
       tagCount: { min: null, max: null },
       tokens: { min: null, max: null },
       created: { from: null, to: null }, // ms timestamps
@@ -326,6 +327,8 @@ const CLM = (() => {
    *   scores: Char Triage's dislike scores, for score: terms. Without them a
    *   score: term matches nothing (better than silently matching everything).
    *   decisions: Char Triage's latest decision per card, for query.kept.
+   *   scanStatus: Char Triage's scan status per card ("current" | "outdated" |
+   *   "no-avatar"; missing = never scanned), for query.scanned.
    */
   function compile(query, extra = {}) {
     const parsed = parseSearch(query.text ?? "");
@@ -343,6 +346,8 @@ const CLM = (() => {
     const scores = extra.scores ?? null;
     const kept = query.kept === "only" || query.kept === "hide" ? query.kept : null;
     const decisions = extra.decisions ?? null;
+    const scanned = ["current", "outdated", "never"].includes(query.scanned) ? query.scanned : null;
+    const scanStatus = extra.scanStatus ?? null;
     const folder = query.folder ?? null;
     const created = query.created ?? {};
     const createdRange = { min: created.from ?? null, max: created.to ?? null };
@@ -351,6 +356,11 @@ const CLM = (() => {
       if (query.favoritesOnly && !card.favorite) return false;
       if (query.untaggedOnly && card.tagCount > 0) return false;
       if (kept && (decisions?.get(card.id) === "keep") !== (kept === "only")) return false;
+      if (scanned) {
+        const status = scanStatus?.get(card.id);
+        // Cards without an avatar can't be scanned: they count as never scanned.
+        if (scanned === "never" ? status === "current" || status === "outdated" : status !== scanned) return false;
+      }
       for (const key of mandatory) if (!card.tagKeys.has(key)) return false;
       for (const key of excluded) if (card.tagKeys.has(key)) return false;
       if (anyOf.length) {
@@ -527,6 +537,7 @@ const CLM = (() => {
       Number(!!query.favoritesOnly) +
       Number(!!query.untaggedOnly) +
       Number(query.kept === "only" || query.kept === "hide") +
+      Number(["current", "outdated", "never"].includes(query.scanned)) +
       Number(query.tagCount.min !== null || query.tagCount.max !== null) +
       Number(query.tokens.min !== null || query.tokens.max !== null) +
       Number(query.created.from !== null || query.created.to !== null)

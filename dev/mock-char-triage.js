@@ -7,6 +7,14 @@
   window.__triageLog = log;
   let scores = new Map();
   let imageTags = new Map();
+  // Unscored cards (every 7th) are "not scanned": a hint from card tags instead; every 5th scanned card is outdated.
+  const hints = new Map();
+  const status = new Map();
+  for (let n = 0; n < 4000; n += 1) {
+    const id = `mock-${String(n).padStart(5, "0")}`;
+    if (n % 7 === 6) hints.set(id, n % 2 ? 0.9 : 0.1);
+    else status.set(id, n % 5 === 0 ? "outdated" : "current");
+  }
   let learn = true;
   // Picture tags: every 4th card (shifted by `offset`) shows inflation, every 8th clearly; odd cards long hair.
   const buildTags = (offset = 0) => {
@@ -76,9 +84,12 @@
     },
     scanState: () => ({ running: false }),
     imageTags: () => imageTags,
+    hints: () => hints,
+    scanStatus: () => status,
     imageTagsOf: (id) => imageTags.get(id) ?? [],
-    scanCards: async (ids) => {
+    scanCards: async (ids, options = {}) => {
       window.__triage.scanned.push(...ids);
+      window.__triage.scanAll = !!options.all;
       return ids.length;
     },
     openPanel: () => {
