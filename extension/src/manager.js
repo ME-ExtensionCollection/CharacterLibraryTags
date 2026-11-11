@@ -778,6 +778,33 @@ const CLMManager = (() => {
     const tagMergerRow = h("div.clm-tagmerger", {}, h("span.clm-label", { text: "Tag Merger:" }), canonicalLabel, foldLabel);
     const tagRows = h("div.clm-tag-rows", {}, ...fields.map((f) => f.row), tagMergerRow);
 
+    // Char Triage keeps: one button that cycles blank (any) -> ✓ (only kept) -> ✗ (hide kept).
+    const KEPT_STATES = [
+      [null, "", "Kept cards: shown (click: only kept)"],
+      ["only", "✓", "Only cards you kept (click: hide kept)"],
+      ["hide", "✗", "Kept cards hidden (click: show all)"],
+    ];
+    const keptButton = h("button.clm-btn.clm-kept-toggle", {
+      attrs: { type: "button" },
+      on: {
+        click: () => {
+          const at = KEPT_STATES.findIndex(([v]) => v === (S.query.kept ?? null));
+          S.query.kept = KEPT_STATES[(at + 1) % KEPT_STATES.length][0];
+          update();
+        },
+      },
+    });
+    const keptToggle = h("div.clm-adv-group.clm-kept-group", { attrs: { hidden: true } }, h("span.clm-label", { text: "Kept" }), keptButton);
+    const renderKeptToggle = () => {
+      const [, mark, title] = KEPT_STATES.find(([v]) => v === (S.query.kept ?? null)) ?? KEPT_STATES[0];
+      keptButton.textContent = mark;
+      keptButton.title = title;
+      keptButton.setAttribute("aria-label", title);
+      keptButton.classList.toggle("clm-on", !!S.query.kept);
+      // Only with Char Triage running (or while the filter is on, so it can be turned off).
+      keptToggle.hidden = !CLMData.charTriage() && !S.query.kept;
+    };
+
     // Advanced filters
     const advanced = h(
       "div.clm-advanced",
@@ -819,6 +846,7 @@ const CLMManager = (() => {
         ),
         " Untagged only",
       ),
+      keptToggle,
       bulkTagGroup(),
     );
 
@@ -864,6 +892,7 @@ const CLMManager = (() => {
       presetBox,
       folderBox,
       favButton,
+      renderKeptToggle,
       triageButton,
       scoresButton,
       count,
@@ -1555,7 +1584,7 @@ const CLMManager = (() => {
   function compute() {
     if (S.indexedItems !== CLMData.items || S.indexedFolders !== CLMData.folders || S.indexedImageTags !== S.imageTags) rebuildIndex();
     scheduleServerSearch();
-    const filtered = CLM.filter(S.index, S.query, { serverIds: S.serverIds, scores: S.scores });
+    const filtered = CLM.filter(S.index, S.query, { serverIds: S.serverIds, scores: S.scores, decisions: S.triageDecisions });
     S.results = CLM.sortCards(filtered, S.sort, S.seed, { scores: S.scores });
     S.facets = CLM.facetCounts(S.results);
   }
@@ -1577,6 +1606,7 @@ const CLMManager = (() => {
     ui.sortSelect.value = S.sort;
     ui.reshuffle.hidden = S.sort !== "random";
     ui.triageButton.hidden = !CLMData.charTriage();
+    ui.renderKeptToggle();
     ui.scoresButton.hidden = !S.scoresPending;
     ui.scopeSelect.value = q.scope;
     ui.scopeBox.sync();
@@ -1700,8 +1730,9 @@ const CLMManager = (() => {
   }
 
   function clearAll() {
-    const scope = S.query.scope;
-    S.query = { ...CLM.emptyQuery(), scope };
+    // Scope and the kept filter are ways of looking, not filters to clear while reviewing.
+    const { scope, kept } = S.query;
+    S.query = { ...CLM.emptyQuery(), scope, kept };
     S.labels.clear();
     ui.searchInput.value = "";
     update();

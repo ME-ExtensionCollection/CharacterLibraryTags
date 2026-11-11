@@ -46,6 +46,7 @@ const CLM = (() => {
       excluded: [], // tag keys, none allowed
       favoritesOnly: false,
       untaggedOnly: false,
+      kept: null, // Char Triage keeps: null = any, "only" = only kept cards, "hide" = hide kept cards
       tagCount: { min: null, max: null },
       tokens: { min: null, max: null },
       created: { from: null, to: null }, // ms timestamps
@@ -324,6 +325,7 @@ const CLM = (() => {
    *   null while that request is pending: then the text matches locally ("any").
    *   scores: Char Triage's dislike scores, for score: terms. Without them a
    *   score: term matches nothing (better than silently matching everything).
+   *   decisions: Char Triage's latest decision per card, for query.kept.
    */
   function compile(query, extra = {}) {
     const parsed = parseSearch(query.text ?? "");
@@ -339,6 +341,8 @@ const CLM = (() => {
     const { creators, notCreators, folders, notFolders } = parsed;
     const scoreTerms = parsed.scores;
     const scores = extra.scores ?? null;
+    const kept = query.kept === "only" || query.kept === "hide" ? query.kept : null;
+    const decisions = extra.decisions ?? null;
     const folder = query.folder ?? null;
     const created = query.created ?? {};
     const createdRange = { min: created.from ?? null, max: created.to ?? null };
@@ -346,6 +350,7 @@ const CLM = (() => {
     return (card) => {
       if (query.favoritesOnly && !card.favorite) return false;
       if (query.untaggedOnly && card.tagCount > 0) return false;
+      if (kept && (decisions?.get(card.id) === "keep") !== (kept === "only")) return false;
       for (const key of mandatory) if (!card.tagKeys.has(key)) return false;
       for (const key of excluded) if (card.tagKeys.has(key)) return false;
       if (anyOf.length) {
@@ -521,6 +526,7 @@ const CLM = (() => {
       Number(query.folder !== null && query.folder !== undefined) +
       Number(!!query.favoritesOnly) +
       Number(!!query.untaggedOnly) +
+      Number(query.kept === "only" || query.kept === "hide") +
       Number(query.tagCount.min !== null || query.tagCount.max !== null) +
       Number(query.tokens.min !== null || query.tokens.max !== null) +
       Number(query.created.from !== null || query.created.to !== null)

@@ -844,4 +844,41 @@ export default async function ({ withPage, assert, BASE }) {
     await page.waitForSelector(".clm-toast:has-text('Char Triage is asking about')");
     assert.deepEqual((await page.evaluate(() => window.__triage.scanned)).sort(), picked);
   }, { query: "?ctr=1" });
+
+  await withPage("manager-kept-filter", async (page, shot) => {
+    await openManager(page);
+    await page.click("[data-toggle='showAdvanced']");
+    await page.waitForSelector(".clm-kept-group:not([hidden])");
+    const ids = await page.$$eval(".clm-card", (n) => n.slice(0, 3).map((x) => x.dataset.id));
+    await page.evaluate((ids) => window.marinaraCharTriage.recordKeep(ids.slice(0, 2)), ids);
+    const toggle = ".clm-kept-toggle";
+    const mark = (m) => page.waitForFunction((m) => document.querySelector(".clm-kept-toggle").textContent.trim() === m, m);
+    await mark("");
+    // ✓: only kept.
+    await page.click(toggle);
+    await mark("✓");
+    await waitCount(page, 2);
+    // ✗: kept hidden.
+    await page.click(toggle);
+    await mark("✗");
+    await waitCount(page, 3003);
+    await shot("hide-kept");
+    // Keep while hiding kept: the card leaves the list at once.
+    await page.click(`.clm-card[data-id="${ids[2]}"]`);
+    await page.click(".clm-details-actions .clm-keep");
+    await waitCount(page, 3002);
+    // Clear keeps the kept filter.
+    await page.fill(".clm-search", "a");
+    await page.click(".clm-clear");
+    await waitCount(page, 3002);
+    // Back to all.
+    await page.click(toggle);
+    await waitCount(page, 3005);
+  }, { query: "?ctr=1" });
+
+  await withPage("manager-kept-filter-without-triage", async (page) => {
+    await openManager(page);
+    await page.click("[data-toggle='showAdvanced']");
+    assert.equal(await page.isHidden(".clm-kept-group"), true);
+  });
 }

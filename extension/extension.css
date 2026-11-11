@@ -1228,6 +1228,11 @@
   background: var(--clm-danger);
 }
 
+.clm-kept-toggle {
+  min-width: 2rem;
+  font-weight: 700;
+}
+
 /* Kept: quiet, since most of a library ends up kept. Clearer on hover. */
 .clm-card-score[data-band="kept"] {
   background: rgb(0 0 0 / 0.35);

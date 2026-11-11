@@ -292,3 +292,15 @@ test("source links: a Chub card with a path and a numeric id gives one link", ()
   // Only a numeric id: still used.
   assert.equal(CLM.sourceLinks({ extensions: { chub: { id: 42 } } }).length, 1);
 });
+
+test("kept filter: only kept, hide kept (explicit keeps only)", () => {
+  const decisions = new Map([["a", "keep"], ["b", "implied-keep"], ["c", "delete"], ["d", "keep"]]);
+  const q = (kept, extra = { decisions }) => run({ kept }, extra);
+  assert.deepEqual(q("only"), ["a", "d"]);
+  assert.deepEqual(q("hide"), ["b", "c", "e", "f"]);
+  assert.equal(q(null).length, 6);
+  // Without Char Triage: nothing is kept.
+  assert.deepEqual(q("only", {}), []);
+  assert.equal(q("hide", {}).length, 6);
+  assert.equal(CLM.activeFilterCount({ ...CLM.emptyQuery(), kept: "hide" }), 1);
+});
