@@ -1228,8 +1228,15 @@
   background: var(--clm-danger);
 }
 
+/* Kept: quiet, since most of a library ends up kept. Clearer on hover. */
 .clm-card-score[data-band="kept"] {
-  background: color-mix(in srgb, #3fb950 70%, rgb(0 0 0 / 0.6));
+  background: rgb(0 0 0 / 0.35);
+  color: rgb(255 255 255 / 0.55);
+  font-weight: 400;
+}
+
+.clm-card:hover .clm-card-score[data-band="kept"] {
+  color: rgb(255 255 255 / 0.85);
 }
 
 .clm-dialog-learn-row {
