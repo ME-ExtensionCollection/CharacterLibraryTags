@@ -8,6 +8,10 @@
 const CLM = (() => {
   "use strict";
 
+  /** Char Triage picture tags start with this; they never come from the card. */
+  const IMAGE_PREFIX = "image:";
+  const isImageTag = (key) => typeof key === "string" && key.startsWith(IMAGE_PREFIX);
+
   // Mirrors normalizeTextForMatch in packages/shared/src/utils/text-matching.ts.
   const normalizeTag = (value) =>
     typeof value === "string" ? value.normalize("NFKC").trim().toLocaleLowerCase().replace(/\s+/gu, " ") : "";
@@ -65,6 +69,9 @@ const CLM = (() => {
    */
   function buildIndex(items, options = {}) {
     const expand = options.expand ?? null;
+    // Char Triage picture tags: id -> ["image:…"]. Matched like tags, never counted as the card's tags.
+    const imageTags = options.imageTags ?? null;
+    const imageUses = new Map(); // key -> cards
     const folders = Array.isArray(options.folders) ? options.folders : [];
     const folderOf = new Map(); // character id -> folder ids
     for (const folder of folders) {
@@ -98,6 +105,14 @@ const CLM = (() => {
           labelUses.set(key, uses);
         }
       }
+      const imageList = [];
+      for (const label of imageTags?.get(item.id) ?? []) {
+        const key = normalizeTag(label);
+        if (!key.startsWith(IMAGE_PREFIX) || seen.has(key)) continue;
+        seen.add(key);
+        imageList.push(key);
+        imageUses.set(key, (imageUses.get(key) ?? 0) + 1);
+      }
       const name = typeof item.name === "string" && item.name.trim() ? item.name.trim() : "Unknown";
       const creator = typeof item.creator === "string" ? item.creator.trim() : "";
       const card = {
@@ -107,8 +122,9 @@ const CLM = (() => {
         nameKey: normalizeTag(name),
         creator,
         creatorKey: normalizeTag(creator),
-        tagKeys: seen,
-        tagList: keys,
+        tagKeys: seen, // card tags and picture tags, for matching
+        tagList: keys, // card tags only
+        imageList,
         tagText: keys.join("\n"),
         tagCount: keys.length,
         rawTagCount: rawTags.length,
@@ -136,6 +152,7 @@ const CLM = (() => {
       }
       tags.set(key, { key, label, count });
     }
+    for (const [key, count] of imageUses) if (!tags.has(key)) tags.set(key, { key, label: key, count, image: true });
     // Member counts only for characters that exist (folders can hold deleted ids).
     const folderList = [...folderById.values()].map((f) => ({
       ...f,
@@ -442,7 +459,10 @@ const CLM = (() => {
   /** Tag key -> number of cards in `cards` that carry it. */
   function facetCounts(cards) {
     const counts = new Map();
-    for (const card of cards) for (const key of card.tagList) counts.set(key, (counts.get(key) ?? 0) + 1);
+    for (const card of cards) {
+      for (const key of card.tagList) counts.set(key, (counts.get(key) ?? 0) + 1);
+      for (const key of card.imageList ?? []) counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
     return counts;
   }
 
@@ -616,6 +636,8 @@ const CLM = (() => {
     serverTerms,
     filter,
     sortCards,
+    isImageTag,
+    IMAGE_PREFIX,
     parseScore,
     scoreBand,
     facetCounts,

@@ -791,4 +791,55 @@ export default async function ({ withPage, assert, BASE }) {
     assert.equal(await page.$(".clm-dialog-learn"), null);
     assert.equal(await page.isHidden(".clm-selbar-keep"), true);
   });
+
+  await withPage("manager-picture-tags", async (page, shot) => {
+    await openManager(page);
+    const ids = await page.evaluate(async () => (await (await fetch("/api/characters/catalog?view=summary")).json()).items.map((i) => i.id));
+    const tagsOf = (id) => page.evaluate((id) => window.marinaraCharTriage.imageTagsOf(id), id);
+    const expected = async (tag) => {
+      const all = await page.evaluate(() => Object.fromEntries(window.marinaraCharTriage.imageTags()));
+      return ids.filter((id) => (all[id] ?? []).includes(tag)).length;
+    };
+    const mandatory = page.locator(".clm-tag-row").filter({ hasText: "Mandatory" }).locator("input");
+    // Plain typing: no picture tags offered.
+    await mandatory.fill("infl");
+    await page.waitForTimeout(150);
+    assert.equal(await page.$$eval(".clm-suggest-item, .clm-suggest li", (n) => n.filter((x) => /image:/.test(x.textContent)).length), 0);
+    // "image:" brings them up.
+    await mandatory.fill("image:infl");
+    await page.waitForFunction(() => [...document.querySelectorAll(".clm-suggest-item, .clm-suggest li")].some((x) => x.textContent.includes("image:inflation")));
+    await shot("suggest");
+    await mandatory.fill("image:inflation:2");
+    await page.keyboard.press("Enter");
+    await waitCount(page, await expected("image:inflation:2"));
+    assert.equal(await page.$$eval(".clm-chip--image", (n) => n.length) > 0, true);
+    // A card's tag count is its own tags only.
+    const first = await page.getAttribute('.clm-card[data-index="0"]', "data-id");
+    const catalogTags = await page.evaluate(async (id) => (await (await fetch("/api/characters/catalog?view=summary")).json()).items.find((i) => i.id === id).tags.length, first);
+    assert.match(await page.textContent('.clm-card[data-index="0"] .clm-card-meta'), new RegExp(`^${catalogTags} tags?`));
+    // Details: picture tags in a closed drawer.
+    await page.click('.clm-card[data-index="0"]');
+    await page.waitForSelector(".clm-picture-tags");
+    assert.equal(await page.$eval(".clm-picture-tags", (n) => n.open), false);
+    assert.deepEqual((await page.$$eval(".clm-picture-tags .clm-chip-label", (n) => n.map((x) => x.textContent))).sort(), (await tagsOf(first)).sort());
+    // Tag cloud leaves them out.
+    await page.click("[data-toggle='showCloud']");
+    await page.waitForSelector(".clm-cloud-tag");
+    assert.equal(await page.$$eval(".clm-cloud-tag", (n) => n.filter((x) => x.textContent.includes("image:")).length), 0);
+    // New picture tags while filtering by them wait for the button.
+    const before = await page.textContent(".clm-count");
+    await page.evaluate(() => window.__triage.retrain(1));
+    await page.waitForSelector(".clm-scores-pending:not([hidden])");
+    assert.equal(await page.textContent(".clm-count"), before);
+    await page.click(".clm-scores-pending");
+    await waitCount(page, await expected("image:inflation:2"));
+    // Ask Char Triage about selected cards (details closed, so Ctrl-click doesn't add the open card).
+    await page.click(".clm-details-close");
+    await page.click('.clm-card[data-index="0"]', { modifiers: ["Control"] });
+    await page.click('.clm-card[data-index="1"]', { modifiers: ["Control"] });
+    const picked = await page.$$eval(".clm-card--checked", (n) => n.map((x) => x.dataset.id).sort());
+    await page.click(".clm-selbar-scan");
+    await page.waitForSelector(".clm-toast:has-text('Char Triage is asking about')");
+    assert.deepEqual((await page.evaluate(() => window.__triage.scanned)).sort(), picked);
+  }, { query: "?ctr=1" });
 }

@@ -6,7 +6,21 @@
   const log = [];
   window.__triageLog = log;
   let scores = new Map();
+  let imageTags = new Map();
   let learn = true;
+  // Picture tags: every 4th card (shifted by `offset`) shows inflation, every 8th clearly; odd cards long hair.
+  const buildTags = (offset = 0) => {
+    const next = new Map();
+    for (let n = 0; n < 4000; n += 1) {
+      const tags = [];
+      if ((n + offset) % 4 === 0) tags.push("image:inflation", "image:inflation:1");
+      if ((n + offset) % 8 === 0) tags.push("image:inflation:2");
+      if (n % 2) tags.push("image:long_hair");
+      if (tags.length) next.set(`mock-${String(n).padStart(5, "0")}`, tags);
+    }
+    imageTags = next;
+  };
+  buildTags();
   const build = (shift = 0) => {
     const next = new Map();
     for (let n = 0; n < 4000; n += 1) {
@@ -21,12 +35,14 @@
     /** Pretend the model retrained: shift every score, fire the change event. */
     retrain(shift = 1) {
       build(shift);
+      buildTags(shift);
       window.dispatchEvent(new CustomEvent("marinara-char-triage:changed"));
     },
     setLearn(value) {
       learn = value;
     },
     opened: 0,
+    scanned: [],
   };
   window.marinaraCharTriage = Object.freeze({
     version: 1,
@@ -56,6 +72,12 @@
       return n;
     },
     scanState: () => ({ running: false }),
+    imageTags: () => imageTags,
+    imageTagsOf: (id) => imageTags.get(id) ?? [],
+    scanCards: async (ids) => {
+      window.__triage.scanned.push(...ids);
+      return ids.length;
+    },
     openPanel: () => {
       window.__triage.opened += 1;
     },

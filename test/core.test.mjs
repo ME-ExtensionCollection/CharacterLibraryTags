@@ -250,3 +250,29 @@ test("likely-disliked sort: highest score first, unscored last by newest", () =>
   const sorted = CLM.sortCards(index.cards, "dislike-desc", 1, { scores }).map((c) => c.id);
   assert.deepEqual(sorted, ["d", "c", "a", "f", "e", "b"]);
 });
+
+test("picture tags: matched like tags, not counted as the card's tags", () => {
+  const imageTags = new Map([["a", ["image:inflation", "image:inflation:1", "image:inflation:2", "image:long_hair"]], ["b", ["image:inflation", "image:inflation:1"]], ["c", ["not-a-picture-tag"]]]);
+  const pic = CLM.buildIndex(tinyCatalog(), { imageTags });
+  const plain = CLM.buildIndex(tinyCatalog());
+  const a = pic.byId.get("a");
+  assert.equal(a.tagCount, plain.byId.get("a").tagCount);
+  assert.deepEqual(a.tagList, plain.byId.get("a").tagList);
+  assert.ok(a.tagKeys.has("image:inflation:2"));
+  assert.equal(pic.byId.get("c").imageList.length, 0, "only image: labels");
+  assert.equal(pic.tags.get("image:inflation").count, 2);
+  assert.equal(pic.tags.get("image:inflation").image, true);
+  const q = (patch) => CLM.filter(pic, { ...CLM.emptyQuery(), ...patch }).map((c) => c.id).sort();
+  assert.deepEqual(q({ mandatory: ["image:inflation"] }), ["a", "b"]);
+  assert.deepEqual(q({ mandatory: ["image:inflation:2"] }), ["a"]);
+  assert.deepEqual(q({ text: "#image:inflation:2" }), ["a"]);
+  assert.equal(q({ excluded: ["image:inflation"] }).length, 4);
+  // Text search over tags does not see picture tags.
+  assert.deepEqual(q({ text: "long_hair", scope: "tags" }), []);
+  const facets = CLM.facetCounts(pic.cards);
+  assert.equal(facets.get("image:inflation"), 2);
+  // Suggestions can hide them (the manager shows them only after "image:").
+  const hidden = CLM.suggestTags(pic.tags, "infl", { visible: (k) => !CLM.isImageTag(k) });
+  assert.equal(hidden.length, 0);
+  assert.equal(CLM.suggestTags(pic.tags, "image:infl")[0].key, "image:inflation");
+});

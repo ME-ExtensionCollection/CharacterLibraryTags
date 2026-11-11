@@ -1185,6 +1185,20 @@
   display: block;
 }
 
+/* Char Triage picture tags: never on the card, so drawn apart from card tags. */
+.clm-chip--image {
+  border-style: dashed;
+}
+
+.clm-chip--image .clm-chip-label::before {
+  content: "◉ ";
+  opacity: 0.7;
+}
+
+.clm-picture-tags .clm-details-tags {
+  padding: 0.4rem 0.2rem;
+}
+
 /* Char Triage dislike band, 1 (likely fine) to 5 (likely disliked). */
 .clm-card-score {
   position: absolute;

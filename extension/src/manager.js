@@ -158,6 +158,8 @@ const CLMManager = (() => {
     expand: null, // Map for fold variants (Tag Merger)
     index: CLM.buildIndex([]),
     indexedItems: null,
+    indexedImageTags: null,
+    imageTags: null, // Char Triage picture tags: id -> ["image:…"]
     results: [],
     facets: new Map(),
     serverKey: "",
@@ -284,10 +286,24 @@ const CLMManager = (() => {
   const chipKeys = () => new Set([...S.query.mandatory, ...S.query.anyOf, ...S.query.excluded]);
   /** Canonical-only mode hides other tags from suggestions, the cloud and card chips. */
   function visibleTag(key) {
-    if (!S.canonicalOnly || !S.canonical || S.canonical.size === 0) return true;
+    if (!S.canonicalOnly || !S.canonical || S.canonical.size === 0 || CLM.isImageTag(key)) return true;
     return S.canonical.has(key) || chipKeys().has(key);
   }
   const visibleFilter = () => (S.canonicalOnly && S.canonical?.size ? visibleTag : null);
+
+  /**
+   * Suggestions: Char Triage picture tags only once you type "image:", so they
+   * never crowd the card tags; the tag cloud leaves them out.
+   */
+  function suggestFilter(text) {
+    const typed = CLM.normalizeTag(String(text).replace(/^[-!~#]+/u, "")).startsWith(CLM.IMAGE_PREFIX);
+    const base = visibleFilter();
+    return (key) => (CLM.isImageTag(key) ? typed : !base || base(key));
+  }
+  const cloudFilter = () => {
+    const base = visibleFilter();
+    return (key) => !CLM.isImageTag(key) && (!base || base(key));
+  };
 
   function addChip(kind, label) {
     const key = CLM.normalizeTag(String(label).replace(/^#+/u, ""));
@@ -404,7 +420,7 @@ const CLMManager = (() => {
     const box = h("div.clm-chip-box", { on: { click: (e) => e.target === box && input.focus() } }, chips, input);
     const suggest = attachSuggest(input, box, {
       compute: () =>
-        CLM.suggestTags(S.index.tags, input.value, { facets: S.facets, taken: chipKeys(), visible: visibleFilter(), limit: 12 }),
+        CLM.suggestTags(S.index.tags, input.value, { facets: S.facets, taken: chipKeys(), visible: suggestFilter(input.value), limit: 12 }),
       pick: (item) => {
         input.value = "";
         addChip(kind, item.label);
@@ -433,8 +449,8 @@ const CLMManager = (() => {
         chips.replaceChildren(
           ...S.query[kind].map((key) =>
             h(
-              `span.clm-chip.${chipClass}`,
-              {},
+              `span.clm-chip.${chipClass}${CLM.isImageTag(key) ? ".clm-chip--image" : ""}`,
+              { attrs: { title: CLM.isImageTag(key) ? "Char Triage picture tag (not on the card)" : null } },
               h("span.clm-chip-label", { text: labelOf(key) }),
               h("button.clm-chip-remove", {
                 text: "×",
@@ -618,7 +634,7 @@ const CLMManager = (() => {
       compute: () => {
         const token = currentTagToken(searchInput);
         if (!token) return [];
-        return CLM.suggestTags(S.index.tags, token.value, { facets: S.facets, taken: chipKeys(), visible: visibleFilter(), limit: 10 });
+        return CLM.suggestTags(S.index.tags, token.value, { facets: S.facets, taken: chipKeys(), visible: suggestFilter(token.value), limit: 10 });
       },
       pick: (item) => {
         const token = currentTagToken(searchInput);
@@ -649,8 +665,8 @@ const CLMManager = (() => {
     );
     const scoresButton = h(
       "button.clm-btn.clm-on.clm-scores-pending",
-      { attrs: { type: "button", title: "Char Triage has new scores. Apply them (the order changes).", hidden: true }, on: { click: () => applyScores() } },
-      "New scores",
+      { attrs: { type: "button", title: "Char Triage has new scores or picture tags. Apply them (the results may change).", hidden: true }, on: { click: () => applyScores() } },
+      "New Char Triage results",
     );
     const favButton = iconButton("star", "Favorites only", () => {
       S.query.favoritesOnly = !S.query.favoritesOnly;
@@ -1068,10 +1084,16 @@ const CLMManager = (() => {
   // ── Char Triage ──
 
   /** Do scores decide what is shown or where (so new ones would move cards under you)? */
-  const scoresShape = () => S.sort === "dislike-desc" || /(^|\s)-?score:/iu.test(S.query.text ?? "");
+  const scoresShape = () =>
+    S.sort === "dislike-desc" ||
+    /(^|\s)-?score:/iu.test(S.query.text ?? "") ||
+    /(^|[\s#~-])image:/iu.test(S.query.text ?? "") ||
+    [...chipKeys()].some(CLM.isImageTag);
 
   function loadScores() {
-    S.scores = CLMData.charTriage()?.scores() ?? null;
+    const triage = CLMData.charTriage();
+    S.scores = triage?.scores() ?? null;
+    S.imageTags = typeof triage?.imageTags === "function" ? triage.imageTags() : null;
     S.scoresPending = false;
   }
 
@@ -1106,6 +1128,18 @@ const CLMManager = (() => {
       clearMulti();
     } catch (error) {
       CLMEdit.toast(`Could not record the keep: ${error.message}`, { error: true });
+    }
+  }
+
+  async function scanSelected() {
+    const triage = CLMData.charTriage();
+    const cards = selectedCards();
+    if (typeof triage?.scanCards !== "function" || !cards.length) return;
+    try {
+      const n = await triage.scanCards(cards.map((c) => c.id));
+      CLMEdit.toast(n ? `Char Triage is asking about ${plural(n, "character")}.` : "Char Triage already has every answer for these.");
+    } catch (error) {
+      CLMEdit.toast(`Char Triage could not scan: ${error.message}`, { error: true });
     }
   }
 
@@ -1194,6 +1228,11 @@ const CLMManager = (() => {
       folderSlot,
       h("span.clm-selbar-sep"),
       h(
+        "button.clm-btn.clm-selbar-scan",
+        { attrs: { type: "button", title: "Ask Char Triage's vision model about these cards now (only the questions each still needs)" }, on: { click: () => void scanSelected() } },
+        "Ask Char Triage",
+      ),
+      h(
         "button.clm-btn.clm-selbar-keep",
         { attrs: { type: "button", title: "These are fine: Char Triage learns from it" }, on: { click: () => void keepSelected() } },
         icon("check"),
@@ -1213,6 +1252,7 @@ const CLMManager = (() => {
         const cards = selectedCards();
         node.hidden = cards.length === 0;
         node.querySelector(".clm-selbar-keep").hidden = !CLMData.charTriage();
+        node.querySelector(".clm-selbar-scan").hidden = typeof CLMData.charTriage()?.scanCards !== "function";
         if (!cards.length) {
           lastSignature = "";
           return;
@@ -1243,7 +1283,7 @@ const CLMManager = (() => {
           ? "clm-chip--excluded"
           : "";
     const chip = h(
-      `span.clm-chip.clm-chip--tag${inQuery ? `.${inQuery}` : ""}`,
+      `span.clm-chip.clm-chip--tag${inQuery ? `.${inQuery}` : ""}${CLM.isImageTag(key) ? ".clm-chip--image" : ""}`,
       {
         attrs: { title: TAG_CLICK_HINT, tabindex: "0", role: "button" },
         on: {
@@ -1340,6 +1380,15 @@ const CLMManager = (() => {
 
     const sourceRow = h("div.clm-details-source", { attrs: { hidden: true } });
     const drawers = h("div.clm-drawers");
+    // Char Triage's picture tags: closed by default, clickable like tags.
+    const pictureTags = card.imageList?.length
+      ? h(
+          "details.clm-drawer.clm-picture-tags",
+          {},
+          h("summary", {}, h("span", { text: "Picture tags" }), h("span.clm-muted", { text: ` ${card.imageList.length} · from Char Triage, not on the card` })),
+          h("div.clm-details-tags", {}, card.imageList.map((key) => tagChip(key))),
+        )
+      : null;
     const summary = h("p.clm-details-summary", { text: item.summary ?? "" });
 
     ui.details.replaceChildren(
@@ -1368,6 +1417,7 @@ const CLMManager = (() => {
         iconButton("x", "Close details", () => select(null), "clm-details-close"),
       ),
       summary,
+      pictureTags,
       drawers,
     );
 
@@ -1452,8 +1502,9 @@ const CLMManager = (() => {
 
   function rebuildIndex() {
     const expand = S.foldVariants ? S.expand : null;
-    S.index = CLM.buildIndex(CLMData.items, { expand, folders: CLMData.folders });
+    S.index = CLM.buildIndex(CLMData.items, { expand, folders: CLMData.folders, imageTags: S.imageTags });
     S.indexedItems = CLMData.items;
+    S.indexedImageTags = S.imageTags;
     S.indexedFolders = CLMData.folders;
     if (S.query.folder && !["none", "some"].includes(S.query.folder) && !S.index.folderById.has(S.query.folder)) S.query.folder = null;
   }
@@ -1487,7 +1538,7 @@ const CLMManager = (() => {
   const viewAnchors = new Map(); // scrollKey -> grid anchor, oldest first
 
   function compute() {
-    if (S.indexedItems !== CLMData.items || S.indexedFolders !== CLMData.folders) rebuildIndex();
+    if (S.indexedItems !== CLMData.items || S.indexedFolders !== CLMData.folders || S.indexedImageTags !== S.imageTags) rebuildIndex();
     scheduleServerSearch();
     const filtered = CLM.filter(S.index, S.query, { serverIds: S.serverIds, scores: S.scores });
     S.results = CLM.sortCards(filtered, S.sort, S.seed, { scores: S.scores });
@@ -1584,7 +1635,7 @@ const CLMManager = (() => {
   }
 
   function renderCloud() {
-    const top = CLM.topTags(S.index.tags, S.facets, { limit: CLOUD_LIMIT, exclude: chipKeys(), visible: visibleFilter() });
+    const top = CLM.topTags(S.index.tags, S.facets, { limit: CLOUD_LIMIT, exclude: chipKeys(), visible: cloudFilter() });
     const max = top[0]?.matching ?? 1;
     ui.cloud.replaceChildren(
       h("div.clm-cloud-title", { text: "Tags in results" }),
