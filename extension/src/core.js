@@ -609,12 +609,15 @@ const CLM = (() => {
       const at = ext.botBrowserSource.indexOf(":");
       if (at > 0) fromSite(ext.botBrowserSource.slice(0, at), ext.botBrowserSource.slice(at + 1));
     }
-    for (const site of Object.keys(SOURCE_SITES)) {
-      const id = ext[site]?.id;
-      if (typeof id === "string" || typeof id === "number") fromSite(site, String(id));
-    }
     const chubPath = ext.chub?.full_path ?? ext.chub?.fullPath;
     if (typeof chubPath === "string" && chubPath.includes("/")) fromSite("chub", chubPath);
+    // A bare id is only a fallback: Chub cards carry both a path and a numeric id,
+    // which give two different URLs for the same page.
+    for (const site of Object.keys(SOURCE_SITES)) {
+      const id = ext[site]?.id;
+      if (out.some((l) => l.label === SOURCE_SITES[site].label)) continue;
+      if (typeof id === "string" || typeof id === "number") fromSite(site, String(id));
+    }
     add(ext.source_url);
     const sources = Array.isArray(data?.source) ? data.source : [data?.source];
     for (const value of sources) add(value);

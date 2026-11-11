@@ -276,3 +276,16 @@ test("picture tags: matched like tags, not counted as the card's tags", () => {
   assert.equal(hidden.length, 0);
   assert.equal(CLM.suggestTags(pic.tags, "image:infl")[0].key, "image:inflation");
 });
+
+test("source links: a Chub card with a path and a numeric id gives one link", () => {
+  const data = {
+    name: "Charlie",
+    extensions: {
+      chub: { id: 7279735, full_path: "perky_leadership_8177/charlie-sutterland-6dbefe9e3e95" },
+      botBrowserSource: "chub:perky_leadership_8177/charlie-sutterland-6dbefe9e3e95",
+    },
+  };
+  assert.deepEqual(CLM.sourceLinks(data), [{ label: "Chub", url: "https://chub.ai/characters/perky_leadership_8177/charlie-sutterland-6dbefe9e3e95" }]);
+  // Only a numeric id: still used.
+  assert.equal(CLM.sourceLinks({ extensions: { chub: { id: 42 } } }).length, 1);
+});
