@@ -694,7 +694,7 @@ export default async function ({ withPage, assert, BASE }) {
         const scores = window.marinaraCharTriage.scores();
         return cards.map((c) => {
           const s = scores.get(c.dataset.id);
-          return [c.querySelector(".clm-card-score").textContent, s === undefined ? "" : String(Math.min(5, 1 + Math.floor(s * 5)))];
+          return [c.querySelector(".clm-card-score").textContent, s === undefined ? "" : String(Math.max(0, Math.min(5, Math.round(s * 5))))];
         });
       });
     const shown = await badges();
@@ -707,7 +707,7 @@ export default async function ({ withPage, assert, BASE }) {
     // score: filter, counted the same way as core.js.
     const scores = await page.evaluate(() => Object.fromEntries(window.marinaraCharTriage.scores()));
     const ids = await page.evaluate(async () => (await (await fetch("/api/characters/catalog?view=summary")).json()).items.map((i) => i.id));
-    const inBand5 = ids.filter((id) => id in scores && Math.min(5, 1 + Math.floor(scores[id] * 5)) === 5).length;
+    const inBand5 = ids.filter((id) => id in scores && Math.max(0, Math.min(5, Math.round(scores[id] * 5))) === 5).length;
     await page.fill(".clm-search", "score:5");
     await waitCount(page, inBand5);
     await page.fill(".clm-search", "");
@@ -731,7 +731,7 @@ export default async function ({ withPage, assert, BASE }) {
       const scores = window.marinaraCharTriage.scores();
       return [...document.querySelectorAll(".clm-card")].every((c) => {
         const s = scores.get(c.dataset.id);
-        return c.querySelector(".clm-card-score").textContent === (s === undefined ? "" : String(Math.min(5, 1 + Math.floor(s * 5))));
+        return c.querySelector(".clm-card-score").textContent === (s === undefined ? "" : String(Math.max(0, Math.min(5, Math.round(s * 5)))));
       });
     });
     assert.equal(await page.isHidden(".clm-scores-pending"), true);
@@ -741,6 +741,8 @@ export default async function ({ withPage, assert, BASE }) {
     const keptId = await page.getAttribute('.clm-card[data-index="0"]', "data-id");
     await page.click(".clm-details-actions .clm-keep");
     await page.waitForSelector(".clm-details-actions .clm-keep:has-text('Kept')");
+    // The kept card's number turns into a check, even while sorted by score (no "new results" wait).
+    await page.waitForFunction((id) => document.querySelector(`.clm-card[data-id="${id}"] .clm-card-score`)?.textContent === "✓", keptId);
     // Keep from the selection bar.
     await page.click('.clm-card[data-index="2"]', { modifiers: ["Control"] });
     await page.click('.clm-card[data-index="3"]', { modifiers: ["Control"] });

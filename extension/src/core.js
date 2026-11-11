@@ -172,7 +172,7 @@ const CLM = (() => {
   //   ~tag  any:x     at least one of these tags
   //   creator:x       creator contains x       creator:"two words"
   //   folder:x        in a folder whose name contains x            -folder:x  not in one
-  //   score:5         Char Triage dislike band 1-5     score:4-5  score:>3  score:<=2
+  //   score:5         Char Triage dislike number 0-5   score:4-5  score:>3  score:<=2
   //   score:>0.8      the raw 0-1 score (a decimal point means raw)   score:none  unscored
   //
   // Tag tokens become chips in the UI (takeTagTokens); the rest stays as text.
@@ -235,8 +235,8 @@ const CLM = (() => {
     }
   }
 
-  /** Char Triage's band for a 0-1 score. */
-  const scoreBand = (score) => Math.min(5, 1 + Math.floor(score * 5));
+  /** Char Triage's 0-5 number for a 0-1 score: the score x 5, rounded (as CTR.bucket). */
+  const scoreBand = (score) => Math.max(0, Math.min(5, Math.round(score * 5)));
 
   function scoreMatches(range, score) {
     if (range.none) return score === undefined;

@@ -170,6 +170,7 @@ const CLMManager = (() => {
     // Char Triage (optional): dislike scores, and new ones held back while they would reorder the list.
     scores: null,
     scoresPending: false,
+    triageDecisions: null, // Char Triage: card id -> latest decision (kept cards show a check)
     viewed: new Set(), // opened in the details pane this session (implied keeps on close)
     multi: new Set(), // ids picked with Ctrl/Shift-click or the card checkboxes
     anchorId: null, // last plain or Ctrl click, for Shift-click ranges
@@ -969,12 +970,18 @@ const CLMManager = (() => {
     if (folders.length) node.children[5].title = `In ${folders.join(", ")}`;
     node.classList.toggle("clm-card--fav", card.favorite);
     const score = S.scores?.get(card.id);
-    const band = score === undefined ? "" : String(CLM.scoreBand(score));
+    // Kept (marked fine) cards show a check instead of their number, so cleared false positives stand out.
+    const kept = S.triageDecisions?.get(card.id) === "keep";
+    const band = kept ? "kept" : score === undefined ? "" : String(CLM.scoreBand(score));
     const badge = node.children[6];
     if (badge.dataset.band !== band) {
       badge.dataset.band = band;
-      badge.textContent = band;
-      badge.title = band ? `Char Triage: ${band} of 5 (${Math.round(score * 100)}% likely disliked)` : "";
+      badge.textContent = kept ? "✓" : band;
+      badge.title = kept
+        ? `Kept: you marked this fine for Char Triage${score === undefined ? "" : ` (it scores ${CLM.scoreBand(score)} of 5)`}`
+        : band
+          ? `Char Triage: ${band} of 5 (${Math.round(score * 100)}% likely disliked)`
+          : "";
     }
     node.setAttribute("aria-selected", String(card.id === S.selectedId));
   }
@@ -1090,7 +1097,14 @@ const CLMManager = (() => {
     /(^|[\s#~-])image:/iu.test(S.query.text ?? "") ||
     [...chipKeys()].some(CLM.isImageTag);
 
+  /** Decisions are never held back: a Keep should show its check at once. */
+  function loadDecisions() {
+    const triage = CLMData.charTriage();
+    S.triageDecisions = typeof triage?.decisions === "function" ? triage.decisions() : null;
+  }
+
   function loadScores() {
+    loadDecisions();
     const triage = CLMData.charTriage();
     S.scores = triage?.scores() ?? null;
     S.imageTags = typeof triage?.imageTags === "function" ? triage.imageTags() : null;
@@ -1112,6 +1126,7 @@ const CLMManager = (() => {
     if (!S.built) return;
     if (!S.open || !S.scores || !scoresShape()) applyScores();
     else {
+      loadDecisions();
       S.scoresPending = true;
       update();
     }

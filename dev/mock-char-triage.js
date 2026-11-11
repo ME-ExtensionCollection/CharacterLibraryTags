@@ -49,9 +49,10 @@
     ready: async () => {},
     scores: () => scores,
     scoreOf: (id) => scores.get(id) ?? null,
-    bucketOf: (id) => (scores.has(id) ? Math.min(5, 1 + Math.floor(scores.get(id) * 5)) : null),
+    bucketOf: (id) => (scores.has(id) ? Math.max(0, Math.min(5, Math.round(scores.get(id) * 5))) : null),
     answers: () => null,
     decisionOf: (id) => decided.get(id) ?? null,
+    decisions: () => new Map(decided),
     learnFromDeletes: () => learn,
     beforeDelete: async (cards, { learnById = {} } = {}) => {
       for (const c of cards) {
@@ -69,6 +70,8 @@
         log.push({ id, decision: implied ? "implied-keep" : "keep" });
         n += 1;
       }
+      // Like Char Triage: a new decision means a change event.
+      window.dispatchEvent(new CustomEvent("marinara-char-triage:changed"));
       return n;
     },
     scanState: () => ({ running: false }),

@@ -223,7 +223,7 @@ test("source links from Bot Browser, Chub and V3 source fields", () => {
 });
 
 test("score: terms filter by Char Triage bands or raw scores", () => {
-  // a=0.95 (band 5), b=0.7 (4), c=0.1 (1), d=0.5 (3), e, f unscored
+  // a=0.95 (5), b=0.7 (4: 3.5 rounds up), c=0.1 (1: 0.5 rounds up), d=0.5 (3), e, f unscored
   const scores = new Map([["a", 0.95], ["b", 0.7], ["c", 0.1], ["d", 0.5]]);
   const q = (text) => run({ text }, { scores });
   assert.deepEqual(q("score:5"), ["a"]);
@@ -241,8 +241,11 @@ test("score: terms filter by Char Triage bands or raw scores", () => {
   assert.equal(q("score:>").length, 6);
   // No Char Triage: a score term matches nothing rather than everything.
   assert.deepEqual(run({ text: "score:5" }), []);
-  assert.equal(CLM.scoreBand(0), 1);
+  assert.equal(CLM.scoreBand(0), 0);
+  assert.equal(CLM.scoreBand(0.5), 3);
   assert.equal(CLM.scoreBand(1), 5);
+  assert.deepEqual(q("score:0"), []); // a=5 b=4 c=1 d=3
+  assert.deepEqual(run({ text: "score:0" }, { scores: new Map([["a", 0.04]]) }), ["a"]);
 });
 
 test("likely-disliked sort: highest score first, unscored last by newest", () => {

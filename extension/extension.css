@@ -1199,7 +1199,7 @@
   padding: 0.4rem 0.2rem;
 }
 
-/* Char Triage dislike band, 1 (likely fine) to 5 (likely disliked). */
+/* Char Triage dislike number, 0 (likely fine) to 5 (likely disliked); a check when kept. */
 .clm-card-score {
   position: absolute;
   bottom: 2.7rem;
@@ -1226,6 +1226,10 @@
 
 .clm-card-score[data-band="5"] {
   background: var(--clm-danger);
+}
+
+.clm-card-score[data-band="kept"] {
+  background: color-mix(in srgb, #3fb950 70%, rgb(0 0 0 / 0.6));
 }
 
 .clm-dialog-learn-row {
