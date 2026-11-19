@@ -927,14 +927,20 @@
   position: absolute;
   inset: 0;
   z-index: 10;
-  display: grid;
-  place-items: center;
+  /* Flex, not grid: a grid row sizes to its content, so the image's
+     percentage max-height never resolved and tall images ran off screen. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 1rem;
   background: rgb(0 0 0 / 0.8);
   cursor: zoom-out;
 }
 
 .clm-preview img {
+  display: block;
+  min-width: 0;
+  min-height: 0;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
