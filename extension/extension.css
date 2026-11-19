@@ -184,6 +184,21 @@
   color: var(--marinara-chat-chrome-panel-muted);
 }
 
+.clt-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--primary, #ec4b97);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.clt-link:hover {
+  filter: brightness(1.15);
+}
+
 @media (max-width: 639px) {
   .clt-panel {
     grid-template-columns: minmax(0, 1fr);

@@ -27,7 +27,7 @@ Open it by **right-clicking the Characters button in the top bar** or **the Open
 - Sort by name, tag count, date added, last updated, token estimate, creator, favorites first, random (with a reshuffle button), or *Likely disliked first* (Char Triage's score, unscored cards last). The dice button picks a random character from the results.
 - The card grid only renders what is on screen, so large libraries scroll smoothly. The slider sets the card size.
 - Arrow keys, Page Up/Down, Home and End move the selection when the grid has focus, and `/` jumps to the search box.
-- The details pane shows the avatar, creator (click to list everything by them), version, dates, token estimate and tags, plus the description, first message, scenario, personality, creator notes and alternate greetings, loaded when you select the character.
+- The details pane shows the avatar, creator (click to list everything by them), version, dates, token estimate and tags, plus the description, first message, scenario, personality, Marinara's appearance and backstory fields, creator notes and alternate greetings, loaded when you select the character. A card's *Public Face* (Marinara's version of the card without its private parts) comes last, since it mostly repeats the rest.
 
 **Actions**
 
@@ -43,13 +43,12 @@ Open it by **right-clicking the Characters button in the top bar** or **the Open
 
 ## Tag filters in the full library
 
-A tag button next to the library toolbar expands three fields:
+A tag button next to the library toolbar expands two fields:
 
 - **Mandatory tags**: shows only characters that have every one of the chosen tags.
-- **At least one tag**: shows only characters that have any of the chosen tags.
 - **Excluded tags**: hides characters that have any of the chosen tags.
 
-The rows combine: a character is shown when it has all mandatory tags, at least one of the "at least one" tags (if any are set), and none of the excluded tags.
+The rows combine: a character is shown when it has all mandatory tags and none of the excluded tags. For *at least one of these tags*, use the Character Manager (the panel links to it).
 
 Type in either field to get tag suggestions with character counts. Add a tag by clicking it or pressing Enter, and move through suggestions with the arrow keys. Backspace in an empty field removes the last tag.
 
@@ -64,7 +63,7 @@ Type in either field to get tag suggestions with character counts. Add a tag by 
 - **Mandatory tags** are written into the library search box as `"Tag"` terms. Marinara treats every search term as a tag the character must have and filters on the server, so this covers characters that aren't loaded yet. Quoting keeps multi-word tags together.
 - **Excluded tags** are written into the search box as `-tag:"Tag"`, which is Marinara's own exclusion syntax.
 - Both stay in sync with the search box. Typing `"X"` or `-tag:"X"` by hand adds a chip, and deleting the token removes the chip.
-- **At least one tag** hides non-matching cards with an injected stylesheet, because Marinara's search has no any-of tag filter. The tag data comes from `GET /api/characters/catalog?view=summary`.
+- There is no *at least one tag* field in the library: Marinara's search has no any-of syntax, and since Marinara draws only the rows on screen (each row a small grid), hiding cards from outside left holes in the rows. Tag suggestions come from `GET /api/characters/catalog?view=summary`.
 - Filters reset every time the library opens, like Marinara's search box.
 - The persona library is left alone.
 
@@ -97,8 +96,6 @@ Every code change disables the extension until you review and approve the new ha
 The library tag filters:
 
 - Once a mandatory tag is set, every other word in the search box also counts as a required tag. For example, `alice "elf"` only matches characters tagged both `alice` and `elf`, not characters named Alice. The panel warns when this happens.
-- **At least one tag** can only hide cards that are already loaded. Marinara loads the next page on its own while the list is short, and the panel shows how many matching characters exist in total.
-- Marinara's own "visible / loaded" count in the library header ignores the **At least one tag** filter.
 - Tags that contain `"` can't be made mandatory or excluded, because the search syntax can't quote them.
 
 ## Development

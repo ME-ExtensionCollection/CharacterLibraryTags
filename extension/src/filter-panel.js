@@ -1,16 +1,17 @@
 // Character Library Tag Filter
 //
 // Full-page External Extension for Marinara Engine. Adds a tag button to the
-// full Character Library that expands "Mandatory tags", "At least one tag" and
-// "Excluded tags" fields with autocomplete.
+// full Character Library that expands "Mandatory tags" and "Excluded tags"
+// fields with autocomplete.
 //
 // - Mandatory (all-of) tags live in the library search box as `"X"` terms.
 //   Marinara reads every positive search term as a required tag and filters
 //   on the server, so they cover pages that are not loaded yet.
 // - Excluded tags live in the search box as `-tag:"X"` tokens, Marinara's own
 //   exclusion syntax. For both, the search box is the source of truth.
-// - Included (any-of) tags hide non-matching cards through an injected
-//   stylesheet, so React-owned nodes are never modified.
+// - There is no "at least one" field here: Marinara's search has no any-of
+//   syntax, and hiding cards in its windowed grid leaves holes in the rows.
+//   The Character Manager (manager.js) has it instead.
 
 const ROOT_SELECTOR = '[data-component="CharacterLibraryView"]';
 const CHARACTER_KIND_SELECTOR = ".mari-panel-gradient--characters";
@@ -38,16 +39,10 @@ const catalog = {
   requestedIds: new Set(), // unknown card ids that already triggered a refresh
 };
 
-// Reset whenever the library mounts, matching Marinara's own search box.
-const includedTags = new Map(); // normalized tag -> label
 let view = null;
 let frame = 0;
 let unknownCardTimer = 0;
 let stopped = false;
-
-const styleElement = document.createElement("style");
-styleElement.id = "clt-tag-style";
-document.head.append(styleElement);
 
 // ── DOM helpers ──
 
@@ -174,41 +169,6 @@ function scheduleCatalogRefresh() {
 }
 
 const labelFor = (key, fallback) => catalog.tagInfo.get(key)?.label ?? fallback;
-
-// ── Include (any-of, stylesheet) ──
-
-function matchesIncluded(tags) {
-  if (!tags) return false;
-  if (includedTags.size === 0) return true;
-  for (const key of includedTags.keys()) if (tags.has(key)) return true;
-  return false;
-}
-
-function renderTagStyle() {
-  let css = "";
-  if (view && includedTags.size > 0) {
-    const selectors = [];
-    for (const [id, tags] of catalog.idToTags) {
-      if (matchesIncluded(tags)) continue;
-      const card = `${ROOT_SELECTOR} [${CARD_ATTRIBUTE}="${CSS.escape(id)}"]`;
-      // The sibling is the inline detail Marinara shows under a selected card on small screens.
-      selectors.push(card, `${card} + .col-span-full`);
-    }
-    if (selectors.length) css = `${selectors.join(",\n")} {\n  display: none !important;\n}\n`;
-  }
-  if (styleElement.textContent !== css) styleElement.textContent = css;
-}
-
-const includedTagSetter = {
-  add(label) {
-    includedTags.set(normalizeTag(label), label);
-    renderFilters();
-  },
-  remove(key) {
-    includedTags.delete(key);
-    renderFilters();
-  },
-};
 
 // ── Search box tokens: mandatory `"X"` and excluded `-tag:"X"` ──
 
@@ -472,7 +432,6 @@ function setPanelOpen(open) {
 }
 
 function mount(root, anchors) {
-  includedTags.clear();
   catalog.requestedIds.clear();
 
   const toggle = el("button", {
@@ -501,15 +460,6 @@ function mount(root, anchors) {
     canAdd: canQuote,
     disabledReason: 'Tags containing " cannot be written as search terms',
   });
-  const includeField = createTagField({
-    id: "clt-include",
-    label: "At least one tag:",
-    chipClass: "clt-chip--include",
-    readTags: () => includedTags,
-    addTag: includedTagSetter.add,
-    removeTag: includedTagSetter.remove,
-    canAdd: () => true,
-  });
   const excludeField = createTagField({
     id: "clt-exclude",
     label: "Excluded tags:",
@@ -521,15 +471,18 @@ function mount(root, anchors) {
     disabledReason: 'Tags containing " cannot be written as search terms',
   });
   const hint = el("p", { className: "clt-hint", attrs: { "aria-live": "polite" } });
+  const managerNote = el("p", { className: "clt-hint clt-manager-note", text: "Need “at least one of these tags”? " });
+  const managerLink = el("button", { className: "clt-link", text: "Open the Character Manager", attrs: { type: "button" } });
+  managerLink.addEventListener("click", () => void CLMManager.open());
+  managerNote.append(managerLink);
   const panel = el("div", { className: "clt-panel", attrs: { id: "clt-panel" } });
   panel.append(
     requiredField.label,
     requiredField.box,
-    includeField.label,
-    includeField.box,
     excludeField.label,
     excludeField.box,
     hint,
+    managerNote,
   );
 
   view = {
@@ -539,7 +492,7 @@ function mount(root, anchors) {
     managerButton,
     badge,
     panel,
-    fields: [requiredField, includeField, excludeField],
+    fields: [requiredField, excludeField],
     hint,
     open: false,
   };
@@ -568,8 +521,6 @@ function unmount() {
   view.managerButton.remove();
   view.panel.remove();
   view = null;
-  includedTags.clear();
-  renderTagStyle();
 }
 
 function renderHint() {
@@ -584,29 +535,12 @@ function renderHint() {
     }
   }
 
-  const required = [...readRequiredTags().keys()];
-  let text = "";
-  if (required.length > 0 || includedTags.size > 0) {
-    if (!catalog.loaded) {
-      text = "Loading tags…";
-    } else {
-      const excluded = [...readExcludedTags().keys()];
-      const matches = (tags) =>
-        !!tags &&
-        required.every((key) => tags.has(key)) &&
-        matchesIncluded(tags) &&
-        !excluded.some((key) => tags.has(key));
-      let visible = 0;
-      for (const id of ids) if (matches(catalog.idToTags.get(id))) visible += 1;
-      let total = 0;
-      for (const tags of catalog.idToTags.values()) if (matches(tags)) total += 1;
-      text = `Showing ${visible} of ${total} characters with these tags.`;
-      if (visible < total) text += " Scroll down or use Load more to see the rest.";
-    }
-    if (required.length > 0 && searchFreeText()) {
-      text += " Other words in the search box are also treated as required tags.";
-    }
-  }
+  // Marinara's header already counts the matches; with a windowed grid the cards
+  // in the DOM are only the rows on screen, so there is nothing more to count here.
+  const text =
+    readRequiredTags().size > 0 && searchFreeText()
+      ? "Other words in the search box are also treated as required tags."
+      : "";
   if (view.hint.textContent !== text) view.hint.textContent = text;
   view.hint.hidden = !text;
 }
@@ -614,8 +548,7 @@ function renderHint() {
 function renderFilters() {
   if (!view) return;
   for (const field of view.fields) field.render();
-  renderTagStyle();
-  const active = readRequiredTags().size + includedTags.size + readExcludedTags().size;
+  const active = readRequiredTags().size + readExcludedTags().size;
   const badgeText = active ? String(active) : "";
   if (view.badge.textContent !== badgeText) view.badge.textContent = badgeText;
   view.badge.hidden = !active;
@@ -649,7 +582,6 @@ marinara.onCleanup(() => {
   observer.disconnect();
   if (frame) cancelAnimationFrame(frame);
   unmount();
-  styleElement.remove();
 });
 
 marinara.log.info("Character Library Tag Filter loaded");

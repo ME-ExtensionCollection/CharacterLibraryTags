@@ -51,6 +51,9 @@ await withPage("filter-panel", async (page, shot) => {
   await page.click("#mock-open-library");
   await page.waitForSelector(".clt-toggle");
   await page.click(".clt-toggle");
+  // No "at least one" field: it left holes in Marinara's windowed grid. The panel points to the manager.
+  assert.equal(await page.$("#clt-include-input"), null);
+  assert.match(await page.textContent(".clt-manager-note"), /Character Manager/);
   await page.fill("#clt-required-input", "female");
   await page.keyboard.press("Enter");
   await page.waitForFunction(() => document.querySelector("[data-component=CharacterLibraryView] input").value.toLowerCase().includes('"female"'));
