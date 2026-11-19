@@ -535,6 +535,12 @@ export default async function ({ withPage, assert, BASE }) {
       await page.waitForSelector(".clm-details-source:not([hidden])");
     };
     await open("Alice");
+    // Marinara's Appearance and Backstory sit with the card text; Public Face comes last.
+    await page.waitForFunction(() => document.querySelectorAll(".clm-drawer").length >= 4);
+    const drawers = await page.$$eval(".clm-drawer summary > span:first-child", (n) => n.map((s) => s.textContent));
+    assert.deepEqual(drawers, ["Description", "First message", "Appearance", "Backstory", "Public Face"]);
+    // No stray "null" where the picture tags drawer would be.
+    assert.ok(![...(await page.$eval(".clm-details", (n) => [...n.childNodes].map((c) => c.nodeType)))].includes(3), "details has a bare text node");
     const href = () => page.$$eval(".clm-source-link", (n) => n.map((a) => a.href));
     assert.deepEqual(await href(), ["https://chub.ai/characters/kestrel/alice-1234"]);
     assert.equal(await page.getAttribute(".clm-source-link", "target"), "_blank");
@@ -585,6 +591,15 @@ export default async function ({ withPage, assert, BASE }) {
       n.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await page.$eval(".clm-grid", (n) => (n.scrollTop = n.scrollHeight / 2));
+    // Wait for the windowed grid to draw cards at the new scroll position.
+    await page.waitForFunction(() => {
+      const grid = document.querySelector(".clm-grid");
+      const view = grid.getBoundingClientRect();
+      return [...grid.querySelectorAll(".clm-card")].some((c) => {
+        const r = c.getBoundingClientRect();
+        return r.top >= view.top && r.bottom <= view.bottom;
+      });
+    });
     await page.waitForTimeout(300);
     const columns = () => page.$$eval(".clm-card", (cards) => new Set(cards.map((c) => c.style.transform.match(/\(([-\d.]+)px/)[1])).size);
     const top = (id) => page.$eval(`.clm-card[data-id="${id}"]`, (n) => Math.round(n.getBoundingClientRect().top));

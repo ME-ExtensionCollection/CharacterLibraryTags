@@ -1504,7 +1504,8 @@ const CLMManager = (() => {
         iconButton("x", "Close details", () => select(null), "clm-details-close"),
       ),
       summary,
-      pictureTags,
+      // replaceChildren() would write a null as the text "null".
+      ...(pictureTags ? [pictureTags] : []),
       drawers,
     );
 
@@ -1516,16 +1517,23 @@ const CLMManager = (() => {
         const full = await CLMData.getCharacter(card.id);
         if (token !== detailToken) return;
         const d = full.data ?? {};
+        const ext = d.extensions ?? {};
         renderSourceRow(sourceRow, CLM.sourceLinks(d));
+        const hasText = ([, text]) => typeof text === "string" && text.trim();
         const sections = [
           ["Description", d.description],
           ["First message", d.first_mes],
           ["Scenario", d.scenario],
           ["Personality", d.personality],
+          // Marinara's own card fields (extensions.appearance / backstory).
+          ["Appearance", ext.appearance],
+          ["Backstory", ext.backstory],
           ["Creator's notes", d.creator_notes],
-        ].filter(([, text]) => typeof text === "string" && text.trim());
+        ].filter(hasText);
         const alternates = Array.isArray(d.alternate_greetings) ? d.alternate_greetings.filter((g) => typeof g === "string" && g.trim()) : [];
         alternates.forEach((g, i) => sections.push([`Alternate greeting ${i + 1}`, g]));
+        // Public Face is the card minus its private parts, so mostly a repeat: last.
+        if (hasText(["", ext.publicFace])) sections.push(["Public Face", ext.publicFace]);
         // The catalog summary is usually the start of one of these; don't show it twice.
         const snippet = (item.summary ?? "").trim().slice(0, 60);
         if (snippet && sections.some(([, text]) => text.trim().startsWith(snippet))) summary.remove();

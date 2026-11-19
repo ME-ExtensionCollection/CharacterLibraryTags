@@ -139,7 +139,12 @@ export function buildLibrary({ count = 3000, seed = 1 } = {}) {
         first_mes: "Hello.",
         creator_notes: "",
         summary: "",
-        extensions: { fav: i === 0, ...SPECIAL_SOURCES[i] },
+        extensions: {
+          fav: i === 0,
+          ...SPECIAL_SOURCES[i],
+          // Marinara's own card fields, shown in the details pane.
+          ...(i === 0 ? { appearance: "Silver hair, green cloak.", backstory: "Raised in the elven woods.", publicFace: "A quiet elf ranger." } : {}),
+        },
         ...(i === 4 ? { source: ["https://example.com/cards/messy-mel", "javascript:alert(1)"] } : {}),
         _tokenPad: 100 * i,
       },
